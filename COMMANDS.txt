@@ -1,0 +1,246 @@
+================================================================================
+                        KAGAMI OS - COMMAND REFERENCE
+================================================================================
+
+Total Commands: 18
+
+================================================================================
+                            SYSTEM INFORMATION
+================================================================================
+
+help
+    Display this command list with brief descriptions
+    Usage: help
+    Supports: -h, --help
+
+logo
+    Display OS logo and system information
+    Usage: logo
+    Supports: -h, --help
+
+status
+    Show system vitals and current user information
+    Usage: status
+    Displays: Memory, file count, current user, current path
+    Supports: -h, --help
+
+whoami
+    Display current user identity and role
+    Usage: whoami
+    Supports: -h, --help
+
+================================================================================
+                         FILE SYSTEM NAVIGATION
+================================================================================
+
+pwd
+    Print working directory - shows current location
+    Usage: pwd
+    Example: pwd
+    Supports: -h, --help
+
+ls
+    List files in current directory (5 per row, folders marked with /)
+    Usage: ls
+    Shows only files in current directory
+    Folders displayed with trailing /
+    Supports: -h, --help
+
+tree
+    Display directory tree structure with indentation
+    Usage: tree
+    Shows entire file system hierarchy
+    Supports: -h, --help
+
+cd <folder>
+    Change directory to specified folder
+    Usage: cd <folder>
+    Examples:
+        cd documents     - Enter documents folder
+        cd ..           - Go to parent directory
+        cd .            - Stay in current directory
+    Supports: -h, --help
+
+================================================================================
+                          FILE OPERATIONS
+================================================================================
+
+read <file>
+    Read and display file contents
+    Usage: read <file>
+    Example: read readme.txt
+    Cannot read folders
+    Supports: -h, --help
+
+create <name>
+    Create a new file or folder
+    Usage:
+        create file.txt           - Create a file
+        create folder/            - Create a folder (trailing /)
+        create dir/file.txt       - Create file in directory (with prompt)
+    Interactive prompts for missing folders
+    Supports: -h, --help
+
+write <file> <text>
+    Write text to a file (overwrites existing content)
+    Usage: write <file> <text>
+    Example: write test.txt Hello from Kagami OS
+    Warning: Overwrites all existing content!
+    File must exist first (use 'create' if needed)
+    Supports: -h, --help
+
+copy <source> <destination>
+    Copy a file to a new name in current directory
+    Usage: copy <source> <destination>
+    Example: copy readme.txt backup.txt
+    Only copies files, not folders
+    Supports: -h, --help
+
+find <pattern>
+    Search for files by name pattern across entire system
+    Usage: find <pattern>
+    Example: find readme
+    Shows full path for each match
+    Supports: -h, --help
+
+rm <file>
+    Delete a file
+    Usage: rm <file>
+    Example: rm oldfile.txt
+    Warning: Cannot be undone!
+    Supports: -h, --help
+
+================================================================================
+                         UTILITY COMMANDS
+================================================================================
+
+echo <text>
+    Display text message
+    Usage: echo <text>
+    Example: echo Hello World
+    Supports: -h, --help
+
+clear
+    Clear screen and show minimal header
+    Usage: clear
+    Displays current path after clearing
+    Supports: -h, --help
+
+================================================================================
+                        USER MANAGEMENT
+================================================================================
+
+useradd <username>
+    Create a new user with home directory
+    Usage: useradd <username>
+    Example: useradd alice
+    Automatically creates /home/<username>/ directory
+    Interactive password prompt
+    Supports: -h, --help
+
+login <username>
+    Switch to different user and their home directory
+    Usage: login <username>
+    Example: login root
+    Changes to user's home directory automatically
+    Interactive password prompt
+    Supports: -h, --help
+
+================================================================================
+                            HELP SYSTEM
+================================================================================
+
+All commands support detailed help:
+    <command> -h        - Show command help
+    <command> --help    - Show command help
+
+Examples:
+    ls -h
+    create --help
+    pwd -h
+
+================================================================================
+                          FILE SYSTEM STRUCTURE
+================================================================================
+
+Default Structure:
+    /
+    └── home/
+        └── root/
+            ├── readme.txt
+            ├── welcome.txt
+            ├── spellbook.txt
+            └── documents/
+                └── secret.txt
+
+User Home Directories:
+    New users get: /home/<username>/
+    Root user home: /home/root/
+
+Maximum Limits:
+    - Total files/folders: 30
+    - Filename length: 32 characters
+    - File content: 256 characters
+    - Parent path: 64 characters
+
+================================================================================
+                           SPECIAL FEATURES
+================================================================================
+
+Prompt Display:
+    - Shows username and path
+    - Uses tilde (~) for home directory abbreviation
+    - Examples:
+        kagami:~>              (in /home/root)
+        kagami:~/documents>    (in /home/root/documents)
+        alice:~>               (in /home/alice)
+
+Auto-Scrolling:
+    - Screen automatically scrolls up when reaching bottom
+    - Preserves command history
+    - 100-pixel scroll increments
+
+Interactive Prompts:
+    - create command prompts for folder creation
+    - User management commands prompt for passwords
+    - Y/N responses accepted
+
+================================================================================
+                          KEYBOARD SHORTCUTS
+================================================================================
+
+Backspace    - Delete last character
+Enter        - Execute command
+Letters      - Standard input (A-Z, a-z)
+Numbers      - Standard input (0-9)
+Symbols      - Supported: Space, /, -, _, ., and more
+
+Shift Support:
+    - Capital letters
+    - Shifted symbols (!, @, #, $, %, etc.)
+
+================================================================================
+                            VERSION INFO
+================================================================================
+
+OS Name: Kagami OS
+Type: Custom x86_64 Operating System
+Boot: UEFI
+Display: 1280x800 framebuffer
+Keyboard: PS/2 polling
+Shell: Unified framebuffer shell
+
+================================================================================
+                              NOTES
+================================================================================
+
+* Commands are case-sensitive (use lowercase)
+* Folder names end with / in listings
+* Nested paths supported (dir/file.txt)
+* Parent directory: Use '..' with cd command
+* Current directory: Files created here by default
+* File system is in-memory (not persistent across reboots)
+
+================================================================================
+                           END OF REFERENCE
+================================================================================
