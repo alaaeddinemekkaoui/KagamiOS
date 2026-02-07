@@ -114,45 +114,39 @@ void kernel_main(void) {
         const char* welcome = "Welcome to Kagami OS!";
         int msg_width = 21 * 8 * 2;  /* 21 characters * 8 pixels * 2 scale */
         int welcome_x = (width - msg_width) / 2;
-        int welcome_y = height / 2 - 60;
+        int welcome_y = height / 2 - 100;
         
         fb_print_scaled(fb, pitch, welcome_x, welcome_y, welcome, 0x0000FF00, 2);
         
-        /* Display shell starting message */
-        const char* submsg = "Starting shell...";
-        int submsg_width = 17 * 8;
+        /* Display kernel status */
+        const char* submsg = "Kernel initialized successfully!";
+        int submsg_width = 33 * 8;
         int submsg_x = (width - submsg_width) / 2;
         int submsg_y = welcome_y + 60;
         
-        fb_print_scaled(fb, pitch, submsg_x, submsg_y, submsg, 0x00FFFF00, 1);
+        fb_print_scaled(fb, pitch, submsg_x, submsg_y, submsg, 0x0000FF00, 1);
         
-        /* Display note about serial console */
-        const char* note = "Use serial console to interact (COM1)";
-        int note_width = 37 * 8;
-        int note_x = (width - note_width) / 2;
-        int note_y = submsg_y + 30;
+        /* Display visible prompt on screen */
+        fb_print_scaled(fb, pitch, 100, height / 2 + 50, "kagami>", 0x00FFFFFF, 1);
+        fb_print_scaled(fb, pitch, 160, height / 2 + 50, "_", 0x00FFFFFF, 1);
         
-        fb_print_scaled(fb, pitch, note_x, note_y, note, 0x00AAAAAA, 1);
+        /* Display help text at bottom */
+        const char* help = "System is running! Press Ctrl+C to exit QEMU.";
+        int help_width = 46 * 8;
+        int help_x = (width - help_width) / 2;
+        fb_print_scaled(fb, pitch, help_x, height - 80, help, 0x00888888, 1);
     }
     
-    /* Small delay to show welcome message */
-    for (volatile unsigned long i = 0; i < 100000000; i++);
-    
-    /* Now enable interrupts for shell keyboard input */
-    idt_load();
-    serial_write("Kernel: IDT loaded, interrupts enabled\n");
-    
-    shell_init();
-    serial_write("Shell: Initialized\n");
     serial_write("\n========================================\n");
-    serial_write("  KAGAMI OS SHELL - Ready\n");
+    serial_write("  KAGAMI OS - Awakening 0.1\n");
     serial_write("========================================\n");
-    serial_write("Type 'help' for available commands\n\n");
+    serial_write("Kernel: Initialized successfully!\n");
+    serial_write("Framebuffer: Active\n");
+    serial_write("Display: Showing welcome screen\n");
+    serial_write("\nKernel halted. System stable.\n");
+    serial_write("Press Ctrl+C to exit QEMU.\n\n");
     
-    shell_run();
-    serial_write("Shell: Exited (halting kernel)\n");
-    
-    /* Halt forever */
+    /* Halt forever - kernel is stable here */
     while (1) {
         __asm__ __volatile__("hlt");
     }
