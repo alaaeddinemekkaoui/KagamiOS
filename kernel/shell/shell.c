@@ -995,6 +995,277 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         return;
     }
     
+    /* === WRITE COMMAND (write text to file) === */
+    if (cmd[0] == 'w' && cmd[1] == 'r' && cmd[2] == 'i' && cmd[3] == 't' && cmd[4] == 'e') {
+        char* args = cmd + 5;
+        while (*args == ' ') args++;
+        
+        if ((args[0] == '-' && args[1] == 'h') || 
+            (args[0] == '-' && args[1] == '-' && args[2] == 'h' && args[3] == 'e' && args[4] == 'l' && args[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Write Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "write <file> <text>  - Write text to file", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Overwrites existing content!", 0x00FF9999);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Example: write test.txt Hello from Kagami", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        /* Parse filename and text */
+        char filename[32];
+        int fn_idx = 0;
+        while (*args && *args != ' ' && fn_idx < 31) {
+            filename[fn_idx++] = *args++;
+        }
+        filename[fn_idx] = 0;
+        
+        while (*args == ' ') args++;
+        
+        if (filename[0] == 0 || *args == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: write <file> <text>", 0x00FFAA00);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        /* Find file */
+        int found = -1;
+        for (int i = 0; i < file_count; i++) {
+            if (file_system[i].is_folder) continue;
+            
+            int match = 1;
+            for (int j = 0; j < 32; j++) {
+                if (filename[j] != file_system[i].name[j]) {
+                    match = 0;
+                    break;
+                }
+                if (filename[j] == 0) break;
+            }
+            
+            if (match) {
+                found = i;
+                break;
+            }
+        }
+        
+        if (found >= 0) {
+            /* Write to file */
+            int idx = 0;
+            while (*args && idx < 255) {
+                file_system[found].content[idx++] = *args++;
+            }
+            file_system[found].content[idx] = 0;
+            file_system[found].size = idx;
+            
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Text inscribed into scroll!", 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        } else {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Scroll not found! Use 'create' first.", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        }
+        return;
+    }
+    
+    /* === COPY COMMAND === */
+    if (cmd[0] == 'c' && cmd[1] == 'o' && cmd[2] == 'p' && cmd[3] == 'y') {
+        char* args = cmd + 4;
+        while (*args == ' ') args++;
+        
+        if ((args[0] == '-' && args[1] == 'h') || 
+            (args[0] == '-' && args[1] == '-' && args[2] == 'h' && args[3] == 'e' && args[4] == 'l' && args[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Copy Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "copy <src> <dest>  - Copy file to new name", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Example: copy file.txt backup.txt", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        if (file_count >= MAX_FILES) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        /* Parse source and destination */
+        char src[32], dest[32];
+        int idx = 0;
+        while (*args && *args != ' ' && idx < 31) {
+            src[idx++] = *args++;
+        }
+        src[idx] = 0;
+        
+        while (*args == ' ') args++;
+        
+        idx = 0;
+        while (*args && *args != ' ' && idx < 31) {
+            dest[idx++] = *args++;
+        }
+        dest[idx] = 0;
+        
+        if (src[0] == 0 || dest[0] == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: copy <source> <destination>", 0x00FFAA00);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        /* Find source file */
+        int src_idx = -1;
+        for (int i = 0; i < file_count; i++) {
+            if (file_system[i].is_folder) continue;
+            int match = 1;
+            for (int j = 0; j < 32; j++) {
+                if (src[j] != file_system[i].name[j]) {
+                    match = 0;
+                    break;
+                }
+                if (src[j] == 0) break;
+            }
+            if (match) {
+                src_idx = i;
+                break;
+            }
+        }
+        
+        if (src_idx < 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Source scroll not found!", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        /* Copy file */
+        int d = 0;
+        while (dest[d] && d < 31) {
+            file_system[file_count].name[d] = dest[d];
+            d++;
+        }
+        file_system[file_count].name[d] = 0;
+        
+        int c = 0;
+        while (file_system[src_idx].content[c] && c < 255) {
+            file_system[file_count].content[c] = file_system[src_idx].content[c];
+            c++;
+        }
+        file_system[file_count].content[c] = 0;
+        file_system[file_count].size = file_system[src_idx].size;
+        file_system[file_count].is_folder = 0;
+        
+        int p = 0;
+        while (current_directory[p] && p < 63) {
+            file_system[file_count].parent[p] = current_directory[p];
+            p++;
+        }
+        file_system[file_count].parent[p] = 0;
+        
+        file_count++;
+        
+        fb_print(fb, pitch, 70, shell_state.cursor_y, "Scroll duplicated!", 0x0088FF88);
+        shell_state.cursor_y += shell_state.line_height + 3;
+        return;
+    }
+    
+    /* === FIND COMMAND === */
+    if (cmd[0] == 'f' && cmd[1] == 'i' && cmd[2] == 'n' && cmd[3] == 'd') {
+        char* pattern = cmd + 4;
+        while (*pattern == ' ') pattern++;
+        
+        if ((pattern[0] == '-' && pattern[1] == 'h') || 
+            (pattern[0] == '-' && pattern[1] == '-' && pattern[2] == 'h' && pattern[3] == 'e' && pattern[4] == 'l' && pattern[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Find Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "find <pattern>  - Search for files by name", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Searches entire file system", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Example: find readme", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        if (pattern[0] == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: find <pattern>", 0x00FFAA00);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        int found_any = 0;
+        for (int i = 0; i < file_count; i++) {
+            /* Simple substring match */
+            int match = 0;
+            for (int j = 0; file_system[i].name[j]; j++) {
+                int sub_match = 1;
+                int k = 0;
+                while (pattern[k]) {
+                    if (file_system[i].name[j + k] != pattern[k]) {
+                        sub_match = 0;
+                        break;
+                    }
+                    k++;
+                }
+                if (sub_match && pattern[0]) {
+                    match = 1;
+                    break;
+                }
+            }
+            
+            if (match) {
+                found_any = 1;
+                fb_print(fb, pitch, 70, shell_state.cursor_y, file_system[i].parent, 0x00888888);
+                fb_print(fb, pitch, 70 + (32 * 8), shell_state.cursor_y, "/", 0x00888888);
+                fb_print(fb, pitch, 70 + (33 * 8), shell_state.cursor_y, file_system[i].name, 0x0088FF88);
+                if (file_system[i].is_folder) {
+                    fb_print(fb, pitch, 70 + (65 * 8), shell_state.cursor_y, "/", 0x0088CCFF);
+                }
+                shell_state.cursor_y += shell_state.line_height + 3;
+            }
+        }
+        
+        if (!found_any) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "No scrolls found matching pattern", 0x00FF9999);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        }
+        return;
+    }
+    
+    /* === TREE COMMAND === */
+    if (cmd[0] == 't' && cmd[1] == 'r' && cmd[2] == 'e' && cmd[3] == 'e') {
+        char* arg = cmd + 4;
+        while (*arg == ' ') arg++;
+        
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Tree Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "tree  - Display directory tree structure", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Shows all files and folders in hierarchy", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        fb_print(fb, pitch, 70, shell_state.cursor_y, "Directory Tree:", 0x00FFFF00);
+        shell_state.cursor_y += shell_state.line_height + 5;
+        
+        /* Display tree starting from root */
+        for (int i = 0; i < file_count; i++) {
+            int depth = 0;
+            for (int j = 0; file_system[i].parent[j]; j++) {
+                if (file_system[i].parent[j] == '/') depth++;
+            }
+            
+            unsigned int indent = 90 + (depth * 16);
+            fb_print(fb, pitch, indent, shell_state.cursor_y, file_system[i].name, 0x0088FF88);
+            if (file_system[i].is_folder) {
+                fb_print(fb, pitch, indent + (32 * 8), shell_state.cursor_y, "/", 0x0088CCFF);
+            }
+            shell_state.cursor_y += shell_state.line_height + 2;
+        }
+        shell_state.cursor_y += shell_state.line_height + 3;
+        return;
+    }
+    
     /* === STATUS COMMAND === */
     if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'a' && cmd[3] == 't') {
         char* arg = cmd + 4;
