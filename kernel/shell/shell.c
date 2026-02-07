@@ -302,6 +302,8 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "logo       - Display realm emblem & info", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
+        fb_print(fb, pitch, 90, shell_state.cursor_y, "pwd        - Print working directory", 0x00CCCCCC);
+        shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "ls         - List files (5 per row, folders marked /)", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "cd <folder> - Enter sacred chamber", 0x00CCCCCC);
@@ -417,15 +419,23 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         }
         int dir_files = 0;
         for (int i = 0; i < file_count; i++) {
-            /* Check if file is in current directory */
+            /* Check if file is in current directory - exact match only */
             int match = 1;
-            for (int j = 0; current_directory[j] && file_system[i].parent[j]; j++) {
+            int j = 0;
+            
+            /* Compare each character */
+            while (current_directory[j] || file_system[i].parent[j]) {
                 if (current_directory[j] != file_system[i].parent[j]) {
                     match = 0;
                     break;
                 }
+                if (current_directory[j] == 0 && file_system[i].parent[j] == 0) {
+                    break;
+                }
+                j++;
             }
-            if (match && current_directory[0] == file_system[i].parent[0]) {
+            
+            if (match) {
                 dir_files++;
             }
         }
@@ -438,15 +448,23 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             unsigned int file_x = 70;
             
             for (int i = 0; i < file_count; i++) {
-                /* Check if file is in current directory */
+                /* Check if file is in current directory - exact match only */
                 int match = 1;
-                for (int j = 0; current_directory[j] && file_system[i].parent[j]; j++) {
+                int j = 0;
+                
+                /* Compare each character */
+                while (current_directory[j] || file_system[i].parent[j]) {
                     if (current_directory[j] != file_system[i].parent[j]) {
                         match = 0;
                         break;
                     }
+                    if (current_directory[j] == 0 && file_system[i].parent[j] == 0) {
+                        break;
+                    }
+                    j++;
                 }
-                if (match && current_directory[0] == file_system[i].parent[0]) {
+                
+                if (match) {
                     /* Display file/folder */
                     if (file_system[i].is_folder) {
                         fb_print(fb, pitch, file_x, shell_state.cursor_y, file_system[i].name, 0x0088CCFF);
@@ -471,6 +489,24 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
                 shell_state.cursor_y += shell_state.line_height + 5;
             }
         }
+        return;
+    }
+    
+    
+    /* === PWD COMMAND (print working directory) === */
+    if (cmd[0] == 'p' && cmd[1] == 'w' && cmd[2] == 'd') {
+        char* arg = cmd + 3;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Print Working Directory Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "pwd  - Display current directory path", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        fb_print(fb, pitch, 70, shell_state.cursor_y, current_directory, 0x0088FFFF);
+        shell_state.cursor_y += shell_state.line_height + 3;
         return;
     }
     
@@ -983,6 +1019,9 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         fb_print(fb, pitch, 90, shell_state.cursor_y, "Shell: Unified with auto-scrolling", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "File System: /home based structure", 0x00CCCCCC);
+        shell_state.cursor_y += shell_state.line_height + 3;
+        fb_print(fb, pitch, 90, shell_state.cursor_y, "Current User: ", 0x00CCCCCC);
+        fb_print(fb, pitch, 90 + (14 * 8), shell_state.cursor_y, current_user, 0x0088FFFF);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "Current Path: ", 0x00CCCCCC);
         fb_print(fb, pitch, 90 + (14 * 8), shell_state.cursor_y, current_directory, 0x0088FFFF);
