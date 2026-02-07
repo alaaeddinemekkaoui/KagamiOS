@@ -1,12 +1,10 @@
-#include "vga/vga.h"
 #include "core/idt.h"
 #include "boot_info.h"
 #include "shell/shell.h"
 #include "core/heap.h"
 #include "drivers/keyboard.h"
-#include "vga/vga_terminal.h"
 
-/* Include new modular components */
+/* Framebuffer and system components */
 #include "include/serial.h"
 #include "include/framebuffer.h"
 #include "include/ascii_art.h"
@@ -97,56 +95,15 @@ void kernel_main(void) {
     serial_write("Keyboard: Waiting for ENTER key (polling mode)...\n");
     keyboard_wait_for_enter();
     serial_write("Keyboard: ENTER pressed!\n");
-    
-    /* Display welcome message on framebuffer */
-    if (boot_info && boot_info->framebuffer_addr) {
-        unsigned int* fb = (unsigned int*)boot_info->framebuffer_addr;
-        unsigned int pitch = boot_info->framebuffer_pitch;
-        unsigned int width = boot_info->framebuffer_width;
-        unsigned int height = boot_info->framebuffer_height;
-        
-        /* Clear framebuffer with black */
-        for (unsigned int i = 0; i < (width * height); i++) {
-            fb[i] = 0x00000000;
-        }
-        
-        /* Display welcome message centered on screen */
-        const char* welcome = "Welcome to Kagami OS!";
-        int msg_width = 21 * 8 * 2;  /* 21 characters * 8 pixels * 2 scale */
-        int welcome_x = (width - msg_width) / 2;
-        int welcome_y = height / 2 - 100;
-        
-        fb_print_scaled(fb, pitch, welcome_x, welcome_y, welcome, 0x0000FF00, 2);
-        
-        /* Display kernel status */
-        const char* submsg = "Kernel initialized successfully!";
-        int submsg_width = 33 * 8;
-        int submsg_x = (width - submsg_width) / 2;
-        int submsg_y = welcome_y + 60;
-        
-        fb_print_scaled(fb, pitch, submsg_x, submsg_y, submsg, 0x0000FF00, 1);
-        
-        /* Display visible prompt on screen */
-        fb_print_scaled(fb, pitch, 100, height / 2 + 50, "kagami>", 0x00FFFFFF, 1);
-        fb_print_scaled(fb, pitch, 160, height / 2 + 50, "_", 0x00FFFFFF, 1);
-        
-        /* Display help text at bottom */
-        const char* help = "System is running! Press Ctrl+C to exit QEMU.";
-        int help_width = 46 * 8;
-        int help_x = (width - help_width) / 2;
-        fb_print_scaled(fb, pitch, help_x, height - 80, help, 0x00888888, 1);
-    }
-    
-    serial_write("\n========================================\n");
-    serial_write("  KAGAMI OS - Awakening 0.1\n");
-    serial_write("========================================\n");
     serial_write("Kernel: Initialized successfully!\n");
     serial_write("Framebuffer: Active\n");
-    serial_write("Display: Showing welcome screen\n");
-    serial_write("\nKernel halted. System stable.\n");
-    serial_write("Press Ctrl+C to exit QEMU.\n\n");
+    serial_write("Display: Starting interactive shell...\n\n");
     
-    /* Halt forever - kernel is stable here */
+    /* Start interactive framebuffer shell with GPU rendering */
+    /* Shell will display ASCII art logo and fantasy welcome message */
+    fb_shell_run(boot_info);
+    
+    /* If shell exits, halt */
     while (1) {
         __asm__ __volatile__("hlt");
     }

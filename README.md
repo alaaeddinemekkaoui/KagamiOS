@@ -16,13 +16,9 @@ Legend speaks of an ancient bootloader, carved from the primordial bits themselv
 
 **UEFI Mode (Recommended for mortals):**
 ```bash
-make uefi-run
+make run
 ```
 
-**BIOS Mode (For the ancient ones):**
-```bash
-./run.sh
-```
 
 ---
 

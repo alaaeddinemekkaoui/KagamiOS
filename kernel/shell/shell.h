@@ -2,6 +2,7 @@
 #define SHELL_H
 
 #include "types.h"
+#include "boot_info.h"
 
 #define SHELL_COMMAND_MAX 80
 #define SHELL_HISTORY_MAX 10
@@ -28,11 +29,12 @@ typedef struct {
     uint8_t running;
 } SHELL_CONTEXT;
 
-/* PublicAPI */
+/* Public API */
 void shell_init(void);
 void shell_run(void);
 void shell_handle_keystroke(uint8_t scancode);
 void shell_execute_command(const char* cmd);
+void fb_shell_run(BOOT_INFO* boot_info);
 
 /* Built-in commands */
 void cmd_help(char* args);
