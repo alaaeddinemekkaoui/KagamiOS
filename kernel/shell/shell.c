@@ -282,6 +282,20 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     
     /* === HELP COMMAND === */
     if (cmd[0] == 'h' && cmd[1] == 'e' && cmd[2] == 'l' && cmd[3] == 'p') {
+        char* arg = cmd + 4;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Help Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "help         - Show all available commands", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "<cmd> -h     - Show help for specific command", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "<cmd> --help - Show help for specific command", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         fb_print(fb, pitch, 70, shell_state.cursor_y, "~ Spellbook of Incantations ~", 0x00FFFF);
         shell_state.cursor_y += shell_state.line_height + 5;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "help       - Display mystical guide", 0x00CCCCCC);
@@ -292,9 +306,9 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "cd <folder> - Enter sacred chamber", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
-        fb_print(fb, pitch, 90, shell_state.cursor_y, "cat <file> - Read scroll contents", 0x00CCCCCC);
+        fb_print(fb, pitch, 90, shell_state.cursor_y, "read <file> - Read scroll contents", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
-        fb_print(fb, pitch, 90, shell_state.cursor_y, "touch <file> - Create new scroll", 0x00CCCCCC);
+        fb_print(fb, pitch, 90, shell_state.cursor_y, "create <name> - Create file/folder (add / for folder)", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "rm <file>  - Destroy scroll", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
@@ -310,23 +324,40 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "clear      - Refresh realm", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
+        fb_print(fb, pitch, 70, shell_state.cursor_y, "Tip: Use '<cmd> -h' or '<cmd> --help' for detailed info", 0x00FFAA00);
+        shell_state.cursor_y += shell_state.line_height + 3;
         return;
     }
     
     /* === CLEAR COMMAND === */
     if (cmd[0] == 'c' && cmd[1] == 'l' && cmd[2] == 'e' && cmd[3] == 'a' && cmd[4] == 'r') {
+        char* arg = cmd + 5;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Clear Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "clear  - Clear screen and show minimal header", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Displays current path after clearing", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         /* Clear framebuffer */
         unsigned int* fb_start = fb;
         for (unsigned int i = 0; i < (width * height); i++) {
             fb_start[i] = 0x000000;
         }
         
-        /* Redraw minimal header */
+        /* Redraw minimal header with status */
         fb_print(fb, pitch, 20, 10, "KAGAMI OS - Type 'logo' for info", 0x0088FF88);
         fb_print(fb, pitch, 20, 30, "=============================================", 0x0055AA55);
+        fb_print(fb, pitch, 20, 50, "[Screen cleared - Ready for new incantations]", 0x00AAAA00);
+        fb_print(fb, pitch, 20, 70, "Current path: ", 0x00888888);
+        fb_print(fb, pitch, 20 + (14 * 8), 70, current_directory, 0x0088FFFF);
         
         /* Reset cursor and scrolling */
-        shell_state.cursor_y = 50;
+        shell_state.cursor_y = 95;
         shell_state.scroll_offset = 0;
         shell_state.pos = 0;
         shell_state.buffer[0] = 0;
@@ -335,6 +366,18 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     
     /* === LOGO COMMAND === */
     if (cmd[0] == 'l' && cmd[1] == 'o' && cmd[2] == 'g' && cmd[3] == 'o') {
+        char* arg = cmd + 4;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Logo Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "logo    - Display OS emblem and system info", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Shows: Version, kernel type, shell info, file system", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, "  _  __   _    ____    _    __  __ ___", 0x00FF00FF, 2);
         shell_state.cursor_y += 28;
         fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, " | |/ /  / \\  / ___|  / \\  |  \\/  |_ _|", 0x00FF00FF, 2);
@@ -360,6 +403,18 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     
     /* === LS COMMAND (horizontal grid layout - 5 per line) === */
     if (cmd[0] == 'l' && cmd[1] == 's') {
+        char* arg = cmd + 2;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "List Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "ls    - List files and folders in current directory", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Format: 5 items per row, folders marked with /", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         int dir_files = 0;
         for (int i = 0; i < file_count; i++) {
             /* Check if file is in current directory */
@@ -423,6 +478,19 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     if (cmd[0] == 'c' && cmd[1] == 'd') {
         char* dirname = cmd + 2;
         while (*dirname == ' ') dirname++;
+        
+        if ((dirname[0] == '-' && dirname[1] == 'h') || 
+            (dirname[0] == '-' && dirname[1] == '-' && dirname[2] == 'h' && dirname[3] == 'e' && dirname[4] == 'l' && dirname[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Change Directory Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "cd <folder>  - Enter specified folder", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "cd ..        - Go to parent directory", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "cd           - Go to root directory", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         
         if (!dirname || dirname[0] == 0) {
             /* cd with no args goes to root */
@@ -511,10 +579,21 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         return;
     }
     
-    /* === CAT COMMAND (read file) === */
-    if (cmd[0] == 'c' && cmd[1] == 'a' && cmd[2] == 't') {
-        char* filename = cmd + 3;
+    /* === READ COMMAND (read file) === */
+    if (cmd[0] == 'r' && cmd[1] == 'e' && cmd[2] == 'a' && cmd[3] == 'd') {
+        char* filename = cmd + 4;
         while (*filename == ' ') filename++;
+        
+        if ((filename[0] == '-' && filename[1] == 'h') || 
+            (filename[0] == '-' && filename[1] == '-' && filename[2] == 'h' && filename[3] == 'e' && filename[4] == 'l' && filename[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Read Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "read <file>  - Display contents of file", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Example: read readme.txt", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         
         int found = 0;
         for (int i = 0; i < file_count; i++) {
@@ -545,27 +624,251 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         return;
     }
     
-    /* === TOUCH COMMAND (create file) === */
-    if (cmd[0] == 't' && cmd[1] == 'o' && cmd[2] == 'u' && cmd[3] == 'c' && cmd[4] == 'h') {
+    /* === CREATE COMMAND (create file/folder with path support) === */
+    if (cmd[0] == 'c' && cmd[1] == 'r' && cmd[2] == 'e' && cmd[3] == 'a' && cmd[4] == 't' && cmd[5] == 'e') {
+        char* path = cmd + 6;
+        while (*path == ' ') path++;
+        
+        if ((path[0] == '-' && path[1] == 'h') || 
+            (path[0] == '-' && path[1] == '-' && path[2] == 'h' && path[3] == 'e' && path[4] == 'l' && path[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Create Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "create <file>        - Create file in current dir", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "create <folder>/     - Create folder (note trailing /)", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "create <dir>/<file>  - Create file in folder", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Examples:", 0x00FFAA00);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "  create test.txt      (creates file)", 0x00AAAAAA);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "  create projects/     (creates folder)", 0x00AAAAAA);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "  create docs/file.md  (file in folder)", 0x00AAAAAA);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
         if (file_count >= MAX_FILES) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
         
-        char* filename = cmd + 5;
-        while (*filename == ' ') filename++;
-        
-        if (filename[0] == 0) {
-            fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: touch <filename>", 0x00FFAA00);
+        if (path[0] == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: create <name> or <name/> or <folder/file>", 0x00FFAA00);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
         
-        /* Create new file in current directory */
+        /* Check if path contains slash */
+        int has_slash = 0;
+        int slash_pos = -1;
+        int len = 0;
+        while (path[len] && path[len] != ' ') {
+            if (path[len] == '/') {
+                has_slash = 1;
+                slash_pos = len;
+            }
+            len++;
+        }
+        
+        /* Case 1: name/ - create folder */
+        if (has_slash && slash_pos == len - 1) {
+            /* Extract folder name without trailing slash */
+            int name_len = 0;
+            while (name_len < slash_pos && name_len < 31) {
+                file_system[file_count].name[name_len] = path[name_len];
+                name_len++;
+            }
+            file_system[file_count].name[name_len] = 0;
+            file_system[file_count].content[0] = 0;
+            file_system[file_count].size = 0;
+            file_system[file_count].is_folder = 1;
+            
+            /* Set parent to current directory */
+            int j = 0;
+            while (current_directory[j] && j < 63) {
+                file_system[file_count].parent[j] = current_directory[j];
+                j++;
+            }
+            file_system[file_count].parent[j] = 0;
+            
+            file_count++;
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Chamber created!", 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
+        /* Case 2: folder/file - file inside folder */
+        if (has_slash && slash_pos < len - 1) {
+            /* Extract folder name */
+            char folder_name[32];
+            int f = 0;
+            while (f < slash_pos && f < 31) {
+                folder_name[f] = path[f];
+                f++;
+            }
+            folder_name[f] = 0;
+            
+            /* Extract file name */
+            char file_name[32];
+            int ff = 0;
+            int p = slash_pos + 1;
+            while (path[p] && path[p] != ' ' && ff < 31) {
+                file_name[ff++] = path[p++];
+            }
+            file_name[ff] = 0;
+            
+            /* Check if folder exists */
+            int folder_found = -1;
+            for (int i = 0; i < file_count; i++) {
+                if (!file_system[i].is_folder) continue;
+                
+                /* Check if name matches */
+                int match = 1;
+                for (int k = 0; k < 32; k++) {
+                    if (folder_name[k] != file_system[i].name[k]) {
+                        match = 0;
+                        break;
+                    }
+                    if (folder_name[k] == 0) break;
+                }
+                
+                /* Check if in current directory */
+                if (match) {
+                    int parent_match = 1;
+                    for (int k = 0; k < 64; k++) {
+                        if (current_directory[k] != file_system[i].parent[k]) {
+                            parent_match = 0;
+                            break;
+                        }
+                        if (current_directory[k] == 0) break;
+                    }
+                    if (parent_match) {
+                        folder_found = i;
+                        break;
+                    }
+                }
+            }
+            
+            if (folder_found >= 0) {
+                /* Create file inside folder */
+                int name_idx = 0;
+                while (file_name[name_idx] && name_idx < 31) {
+                    file_system[file_count].name[name_idx] = file_name[name_idx];
+                    name_idx++;
+                }
+                file_system[file_count].name[name_idx] = 0;
+                file_system[file_count].content[0] = 0;
+                file_system[file_count].size = 0;
+                file_system[file_count].is_folder = 0;
+                
+                /* Set parent to folder path */
+                int pp = 0;
+                while (current_directory[pp] && pp < 62) {
+                    file_system[file_count].parent[pp] = current_directory[pp];
+                    pp++;
+                }
+                if (pp > 0 && file_system[file_count].parent[pp - 1] != '/') {
+                    file_system[file_count].parent[pp++] = '/';
+                }
+                int fn = 0;
+                while (folder_name[fn] && pp < 63) {
+                    file_system[file_count].parent[pp++] = folder_name[fn++];
+                }
+                file_system[file_count].parent[pp] = 0;
+                
+                file_count++;
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Scroll inscribed in chamber!", 0x0088FF88);
+                shell_state.cursor_y += shell_state.line_height + 3;
+            } else {
+                /* Folder doesn't exist - ask to create */
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Chamber not found! Create it? (y/n)", 0x00FFAA00);
+                shell_state.cursor_y += shell_state.line_height + 3;
+                render_input(fb, pitch, width, "[y/n]> ");
+                
+                /* Wait for y or n key */
+                char response = 0;
+                while (1) {
+                    char c = get_keyboard_char();
+                    if (c == 'y' || c == 'Y') {
+                        response = 'y';
+                        break;
+                    } else if (c == 'n' || c == 'N' || c == '\n') {
+                        response = 'n';
+                        break;
+                    }
+                }
+                
+                shell_state.cursor_y += shell_state.line_height + 3;
+                
+                if (response == 'y') {
+                    /* Create folder first */
+                    if (file_count >= MAX_FILES - 1) {
+                        fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
+                        shell_state.cursor_y += shell_state.line_height + 3;
+                        return;
+                    }
+                    
+                    int fn_idx = 0;
+                    while (folder_name[fn_idx] && fn_idx < 31) {
+                        file_system[file_count].name[fn_idx] = folder_name[fn_idx];
+                        fn_idx++;
+                    }
+                    file_system[file_count].name[fn_idx] = 0;
+                    file_system[file_count].content[0] = 0;
+                    file_system[file_count].size = 0;
+                    file_system[file_count].is_folder = 1;
+                    
+                    int pp = 0;
+                    while (current_directory[pp] && pp < 63) {
+                        file_system[file_count].parent[pp] = current_directory[pp];
+                        pp++;
+                    }
+                    file_system[file_count].parent[pp] = 0;
+                    file_count++;
+                    
+                    /* Now create file */
+                    int name_idx = 0;
+                    while (file_name[name_idx] && name_idx < 31) {
+                        file_system[file_count].name[name_idx] = file_name[name_idx];
+                        name_idx++;
+                    }
+                    file_system[file_count].name[name_idx] = 0;
+                    file_system[file_count].content[0] = 0;
+                    file_system[file_count].size = 0;
+                    file_system[file_count].is_folder = 0;
+                    
+                    pp = 0;
+                    while (current_directory[pp] && pp < 62) {
+                        file_system[file_count].parent[pp] = current_directory[pp];
+                        pp++;
+                    }
+                    if (pp > 0 && file_system[file_count].parent[pp - 1] != '/') {
+                        file_system[file_count].parent[pp++] = '/';
+                    }
+                    fn_idx = 0;
+                    while (folder_name[fn_idx] && pp < 63) {
+                        file_system[file_count].parent[pp++] = folder_name[fn_idx++];
+                    }
+                    file_system[file_count].parent[pp] = 0;
+                    file_count++;
+                    
+                    fb_print(fb, pitch, 70, shell_state.cursor_y, "Chamber & scroll created!", 0x0088FF88);
+                } else {
+                    fb_print(fb, pitch, 70, shell_state.cursor_y, "Creation canceled.", 0x00FF9999);
+                }
+                shell_state.cursor_y += shell_state.line_height + 3;
+            }
+            return;
+        }
+        
+        /* Case 3: simple name - create file */
         int name_len = 0;
-        while (filename[name_len] && filename[name_len] != ' ' && name_len < 31) {
-            file_system[file_count].name[name_len] = filename[name_len];
+        while (path[name_len] && path[name_len] != ' ' && name_len < 31) {
+            file_system[file_count].name[name_len] = path[name_len];
             name_len++;
         }
         file_system[file_count].name[name_len] = 0;
@@ -575,7 +878,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         
         /* Set parent directory */
         int j = 0;
-        while (current_directory[j] && j < 31) {
+        while (current_directory[j] && j < 63) {
             file_system[file_count].parent[j] = current_directory[j];
             j++;
         }
@@ -583,7 +886,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         
         file_count++;
         
-        fb_print(fb, pitch, 70, shell_state.cursor_y, "New scroll inscribed!", 0x0088FF88);
+        fb_print(fb, pitch, 70, shell_state.cursor_y, "Scroll inscribed!", 0x0088FF88);
         shell_state.cursor_y += shell_state.line_height + 3;
         return;
     }
@@ -592,6 +895,17 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     if (cmd[0] == 'r' && cmd[1] == 'm' && cmd[2] == ' ') {
         char* filename = cmd + 3;
         while (*filename == ' ') filename++;
+        
+        if ((filename[0] == '-' && filename[1] == 'h') || 
+            (filename[0] == '-' && filename[1] == '-' && filename[2] == 'h' && filename[3] == 'e' && filename[4] == 'l' && filename[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Remove Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "rm <file>  - Delete specified file", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Warning: This action cannot be undone!", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         
         int found = -1;
         for (int i = 0; i < file_count; i++) {
@@ -627,6 +941,17 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         char* text = cmd + 4;
         while (*text == ' ') text++;
         
+        if ((text[0] == '-' && text[1] == 'h') || 
+            (text[0] == '-' && text[1] == '-' && text[2] == 'h' && text[3] == 'e' && text[4] == 'l' && text[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Echo Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "echo <text>  - Display text message", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Example: echo Hello World", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
         if (*text) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, text, 0x00FF00);
         }
@@ -636,6 +961,19 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     
     /* === STATUS COMMAND === */
     if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'a' && cmd[3] == 't') {
+        char* arg = cmd + 4;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == 'u' && arg[1] == 's') || 
+            ((arg[0] == '-' && arg[1] == 'h') || 
+             (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p'))) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Status Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "status  - Show system vitals and current path", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Displays: User, display info, shell, file system", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         fb_print(fb, pitch, 70, shell_state.cursor_y, "~ The Kingdom's Vitals ~", 0x0088FF88);
         shell_state.cursor_y += shell_state.line_height + 5;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "Keeper: Awakened and Wandering", 0x00CCCCCC);
@@ -654,6 +992,16 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     
     /* === WHOAMI COMMAND === */
     if (cmd[0] == 'w' && cmd[1] == 'h' && cmd[2] == 'o' && cmd[3] == 'a' && cmd[4] == 'm' && cmd[5] == 'i') {
+        char* arg = cmd + 6;
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') || 
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Whoami Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "whoami  - Display current user and role", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         char whoami_msg[96];
         char* ptr = whoami_msg;
         
@@ -679,14 +1027,27 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     /* === USERADD COMMAND === */
     if (cmd[0] == 'u' && cmd[1] == 's' && cmd[2] == 'e' && cmd[3] == 'r' && 
         cmd[4] == 'a' && cmd[5] == 'd' && cmd[6] == 'd') {
+        char* username = cmd + 7;
+        while (*username == ' ') username++;
+        
+        if ((username[0] == '-' && username[1] == 'h') || 
+            (username[0] == '-' && username[1] == '-' && username[2] == 'h' && username[3] == 'e' && username[4] == 'l' && username[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Useradd Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "useradd <name>  - Create new user with home dir", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Default password: welcome", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Creates: /home/<name> folder automatically", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        
         if (user_count >= MAX_USERS) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Realm is full!", 0x00FF4444);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
-        
-        char* username = cmd + 7;
-        while (*username == ' ') username++;
         
         if (!username || username[0] == 0) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: useradd <username>", 0x00FFAA00);
@@ -768,6 +1129,17 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     if (cmd[0] == 'l' && cmd[1] == 'o' && cmd[2] == 'g' && cmd[3] == 'i' && cmd[4] == 'n') {
         char* username = cmd + 5;
         while (*username == ' ') username++;
+        
+        if ((username[0] == '-' && username[1] == 'h') || 
+            (username[0] == '-' && username[1] == '-' && username[2] == 'h' && username[3] == 'e' && username[4] == 'l' && username[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Login Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "login <user>  - Switch to different user", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Auto switches to user's home directory", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         
         if (!username || username[0] == 0) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: login <username>", 0x00FFAA00);
