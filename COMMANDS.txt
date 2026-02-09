@@ -178,7 +178,7 @@ User Home Directories:
     Root user home: /home/root/
 
 Maximum Limits:
-    - Total files/folders: 30
+    - Total files/folders: limited by heap memory (default ~1MB)
     - Filename length: 32 characters
     - File content: 256 characters
     - Parent path: 64 characters

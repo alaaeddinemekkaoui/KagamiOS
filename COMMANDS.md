@@ -191,7 +191,7 @@ pwd -h
 ### Maximum Limits
 | Item | Limit |
 |------|-------|
-| Total files/folders | 30 |
+| Total files/folders | Limited by heap memory (default ~1MB) |
 | Filename length | 32 characters |
 | File content | 256 characters |
 | Parent path | 64 characters |
@@ -303,7 +303,7 @@ pwd                    # Now in /home/alice
 - Commands are case-sensitive (use lowercase)
 - File system is in-memory (not persistent across reboots)
 - `write` and `rm` commands cannot be undone
-- Maximum 30 files/folders system-wide
+- Total files/folders limited by heap memory
 
 💡 **Tips:**
 - Use `<command> -h` for detailed help on any command

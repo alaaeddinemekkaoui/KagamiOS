@@ -3,6 +3,7 @@
 #include "include/serial.h"
 #include "drivers/keyboard.h"
 #include "boot_info.h"
+#include "core/heap.h"
 
 /* Simple macros for memory access */
 #define inb(port) ({ \
@@ -56,19 +57,80 @@ typedef struct {
     char parent[64]; /* Parent directory path */
 } VirtualFile;
 
-static VirtualFile file_system[] = {
+#define INITIAL_FILE_CAPACITY 32
+
+static const VirtualFile initial_files[] = {
     {"home", "", 0, 1, "/"},
     {"root", "", 0, 1, "/home"},
     {"readme.txt", "Welcome to Kagami OS! A magical realm of code.\nType 'ls' to explore.", 65, 0, "/home/root"},
     {"welcome.txt", "You have entered the Realm of Kagami.\nMay your code be swift and bug-free.", 70, 0, "/home/root"},
     {"spellbook.txt", "Available Spells:\n- help: Reveal all incantations\n- logo: Display realm emblem", 82, 0, "/home/root"},
     {"documents", "", 0, 1, "/home/root"},
-    {"secret.txt", "The wizard guardian of this realm welcomes you!", 47, 0, "/home/root/documents"},
-    {"", "", 0, 0, ""}
+    {"secret.txt", "The wizard guardian of this realm welcomes you!", 47, 0, "/home/root/documents"}
 };
 
-#define MAX_FILES 30
-static int file_count = 7;
+static VirtualFile* file_system = 0;
+static int file_count = 0;
+static int file_capacity = 0;
+static int fs_initialized = 0;
+
+static void fs_init(void) {
+    if (fs_initialized) {
+        return;
+    }
+
+    int initial_count = (int)(sizeof(initial_files) / sizeof(initial_files[0]));
+    int capacity = INITIAL_FILE_CAPACITY;
+    if (capacity < initial_count) {
+        capacity = initial_count;
+    }
+
+    file_system = (VirtualFile*)calloc((size_t)capacity, sizeof(VirtualFile));
+    if (!file_system) {
+        /* Fallback to static data if heap is unavailable */
+        file_system = (VirtualFile*)initial_files;
+        file_count = initial_count;
+        file_capacity = initial_count;
+        fs_initialized = 1;
+        return;
+    }
+
+    for (int i = 0; i < initial_count; i++) {
+        file_system[i] = initial_files[i];
+    }
+
+    file_count = initial_count;
+    file_capacity = capacity;
+    fs_initialized = 1;
+}
+
+static int fs_ensure_capacity(int additional) {
+    if (!fs_initialized) {
+        fs_init();
+    }
+
+    if (file_count + additional <= file_capacity) {
+        return 1;
+    }
+
+    int new_capacity = file_capacity > 0 ? file_capacity : INITIAL_FILE_CAPACITY;
+    while (new_capacity < file_count + additional) {
+        new_capacity *= 2;
+    }
+
+    VirtualFile* new_fs = (VirtualFile*)calloc((size_t)new_capacity, sizeof(VirtualFile));
+    if (!new_fs) {
+        return 0;
+    }
+
+    for (int i = 0; i < file_count; i++) {
+        new_fs[i] = file_system[i];
+    }
+
+    file_system = new_fs;
+    file_capacity = new_capacity;
+    return 1;
+}
 
 /* Shell state */
 static struct {
@@ -80,6 +142,21 @@ static struct {
     unsigned int line_height;
     unsigned int scroll_offset;  /* Lines scrolled up */
 } shell_state = {0};
+
+static const char* command_menu[] = {
+    "================================================================================",
+    "                        KAGAMI OS - COMMAND REFERENCE",
+    "================================================================================",
+    "System: help, logo, status, whoami",
+    "Navigation: pwd, ls, tree, cd",
+    "File Ops: read, create, write, copy, find, rm",
+    "Utility: echo, clear",
+    "Users: useradd, login",
+    "",
+    "Tip: <command> -h or --help for details",
+    "================================================================================",
+    0
+};
 
 /* Poll PS/2 keyboard for any available scancode */
 static unsigned char poll_keyboard(void) {
@@ -284,6 +361,14 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
     if (cmd[0] == 'h' && cmd[1] == 'e' && cmd[2] == 'l' && cmd[3] == 'p') {
         char* arg = cmd + 4;
         while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'm') ||
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'm' && arg[3] == 'e' && arg[4] == 'n' && arg[5] == 'u')) {
+            for (int i = 0; command_menu[i]; i++) {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, command_menu[i], 0x0088FF88);
+                shell_state.cursor_y += shell_state.line_height + 3;
+            }
+            return;
+        }
         if ((arg[0] == '-' && arg[1] == 'h') || 
             (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Help Command Usage:", 0x00FFFF00);
@@ -293,6 +378,8 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             fb_print(fb, pitch, 90, shell_state.cursor_y, "<cmd> -h     - Show help for specific command", 0x00CCCCCC);
             shell_state.cursor_y += shell_state.line_height + 3;
             fb_print(fb, pitch, 90, shell_state.cursor_y, "<cmd> --help - Show help for specific command", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "help -m / --menu - Show command reference", 0x00CCCCCC);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
@@ -336,6 +423,15 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 70, shell_state.cursor_y, "Tip: Use '<cmd> -h' or '<cmd> --help' for detailed info", 0x00FFAA00);
         shell_state.cursor_y += shell_state.line_height + 3;
+        return;
+    }
+
+    /* === MENU COMMAND (command reference) === */
+    if (cmd[0] == 'm' && cmd[1] == 'e' && cmd[2] == 'n' && cmd[3] == 'u') {
+        for (int i = 0; command_menu[i]; i++) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, command_menu[i], 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        }
         return;
     }
     
@@ -694,7 +790,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             return;
         }
         
-        if (file_count >= MAX_FILES) {
+        if (!fs_ensure_capacity(1)) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
@@ -850,7 +946,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
                 
                 if (response == 'y') {
                     /* Create folder first */
-                    if (file_count >= MAX_FILES - 1) {
+                    if (!fs_ensure_capacity(2)) {
                         fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
                         shell_state.cursor_y += shell_state.line_height + 3;
                         return;
@@ -1091,7 +1187,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             return;
         }
         
-        if (file_count >= MAX_FILES) {
+        if (!fs_ensure_capacity(1)) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
@@ -1406,25 +1502,29 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         users[user_count].password[pass_len] = 0;
         
         /* Create home directory for new user */
-        if (file_count < MAX_FILES - 1) {
-            /* Add home folder for user */
-            int u = 0;
-            while (users[user_count].username[u] && u < 31) {
-                file_system[file_count].name[u] = users[user_count].username[u];
-                u++;
-            }
-            file_system[file_count].name[u] = 0;
-            file_system[file_count].content[0] = 0;
-            file_system[file_count].size = 0;
-            file_system[file_count].is_folder = 1;
-            file_system[file_count].parent[0] = '/';
-            file_system[file_count].parent[1] = 'h';
-            file_system[file_count].parent[2] = 'o';
-            file_system[file_count].parent[3] = 'm';
-            file_system[file_count].parent[4] = 'e';
-            file_system[file_count].parent[5] = 0;
-            file_count++;
+        if (!fs_ensure_capacity(1)) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Vault is full!", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
         }
+
+        /* Add home folder for user */
+        int u = 0;
+        while (users[user_count].username[u] && u < 31) {
+            file_system[file_count].name[u] = users[user_count].username[u];
+            u++;
+        }
+        file_system[file_count].name[u] = 0;
+        file_system[file_count].content[0] = 0;
+        file_system[file_count].size = 0;
+        file_system[file_count].is_folder = 1;
+        file_system[file_count].parent[0] = '/';
+        file_system[file_count].parent[1] = 'h';
+        file_system[file_count].parent[2] = 'o';
+        file_system[file_count].parent[3] = 'm';
+        file_system[file_count].parent[4] = 'e';
+        file_system[file_count].parent[5] = 0;
+        file_count++;
         
         user_count++;
         
@@ -1525,7 +1625,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
 
 /* Initialize shell */
 void shell_init(void) {
-    /* Initialization if needed */
+    fs_init();
 }
 
 /* Main framebuffer shell */
@@ -1539,6 +1639,8 @@ void fb_shell_run(BOOT_INFO* boot_info) {
         serial_write("ERROR: No framebuffer available for shell!\n");
         return;
     }
+
+    fs_init();
     
     unsigned int* fb = (unsigned int*)(unsigned long)boot_info->framebuffer_addr;
     unsigned int pitch = boot_info->framebuffer_pitch;
