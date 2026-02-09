@@ -26,26 +26,46 @@ make run
 
 Once you awaken the OS, these are your incantations:
 
-| Command | Magic Effect |
-|---------|-------------|
-| `help` | Reveals all available spells |
-| `clear` | Banishes text from the realm |
-| `status` | Peers into the system's soul |
-| `bootinfo` | Deciphers the boot runes |
-| `echo <text>` | Summons text from the void |
-| `meminfo` | Reveals memory mysteries |
-| `reboot` | Returns to the beginning of time |
+**📚 [Complete Command Reference → COMMANDS.md](COMMANDS.md)**
+
+The OS now features **18 powerful commands** for file management, navigation, and system control!
+
+**Quick Command List:**
+- **System:** `help`, `logo`, `status`, `whoami`
+- **Navigation:** `pwd`, `ls`, `tree`, `cd`
+- **File Operations:** `read`, `create`, `write`, `copy`, `find`, `rm`
+- **Utility:** `echo`, `clear`
+- **User Management:** `useradd`, `login`
+
+💡 **Tip:** All commands support `-h` or `--help` for detailed usage information!
+
+**Example Spells:**
+```bash
+help              # Show all commands
+pwd               # Where am I?
+ls                # What's here?
+create file.txt   # Summon a scroll
+write file.txt Hello from Kagami!
+read file.txt     # Read the scroll
+tree              # View the realm structure
+find readme       # Seek hidden scrolls
+```
 
 ---
 
 ## ✨ Features (What Powers You Possess)
 
-- 🎨 **Mystical Graphics** - Direct GPU framebuffer manipulation
-- ⌨️ **Keyboard Sorcery** - PS/2 controller communion
-- 🖥️ **Interactive Shell** - Command the metal directly
+- 🎨 **Mystical Graphics** - Direct GPU framebuffer manipulation (1280×800)
+- ⌨️ **Keyboard Sorcery** - PS/2 controller communion with full scancode support
+- 🖥️ **Interactive Shell** - 18 powerful commands to control the realm
+- 📁 **File System** - Virtual in-memory file system with Linux-style `/home` structure
 - 💾 **Memory Magic** - Heap allocation spells
 - 🛡️ **Exception Shields** - Interrupt handlers stand guard
-- 📜 **ASCII Prophecy** - Beautiful boot logo in cyan
+- 📜 **ASCII Prophecy** - Beautiful boot logo in mystical colors
+- 👥 **User Management** - Multi-user support with home directories
+- 🔍 **Auto-Scrolling** - History preserved as you journey through commands
+
+📖 **[Full Documentation → COMMANDS.md](COMMANDS.md)** - Complete command reference with examples
 
 ---
 
