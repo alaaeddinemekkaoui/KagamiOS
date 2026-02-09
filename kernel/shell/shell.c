@@ -11,6 +11,7 @@
 #include "drivers/storage/partition.h"
 #include "drivers/bus/pci.h"
 #include "net/net.h"
+#include "klog.h"
 
 /* Simple macros for memory access */
 #define inb(port) ({ \
@@ -363,7 +364,48 @@ static void fb_clear_rect(unsigned int* fb, unsigned int pitch, unsigned int wid
 
 /* Get single character from keyboard via polling */
 static char get_keyboard_char(void) {
-    return (char)keyboard_getchar();
+    unsigned char scancode;
+    int shift_pressed = 0;
+    
+    while (1) {
+        scancode = poll_keyboard();
+        
+        if (scancode > 0) {
+            /* Handle shift key */
+            if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
+                shift_pressed = 1;
+                continue;
+            }
+            if (scancode == 0xAA || scancode == 0xB6) {
+                shift_pressed = 0;
+                continue;
+            }
+            
+            /* Ignore key releases */
+            if (scancode & 0x80) {
+                continue;
+            }
+            
+            /* Handle backspace */
+            if (scancode == SC_BACKSPACE) {
+                return '\b';
+            }
+            
+            /* Handle enter */
+            if (scancode == 0x1C) {
+                return '\n';
+            }
+            
+            /* Convert to ASCII */
+            char c = scancode_to_char(scancode, shift_pressed);
+            if (c > 0) {
+                return c;
+            }
+        }
+        
+        /* Small delay to avoid busy-waiting */
+        for (volatile int i = 0; i < 1000; i++);
+    }
 }
 
 /* Render current input line to framebuffer */
@@ -2367,6 +2409,8 @@ void fb_shell_run(BOOT_INFO* boot_info) {
     }
 
     fs_init();
+
+    KLOG("Shell: entering framebuffer mode");
     
     unsigned int* fb = (unsigned int*)(unsigned long)boot_info->framebuffer_addr;
     unsigned int pitch = boot_info->framebuffer_pitch;
@@ -2377,42 +2421,54 @@ void fb_shell_run(BOOT_INFO* boot_info) {
     for (unsigned int i = 0; i < (width * height); i++) {
         fb[i] = 0x000000;
     }
-    
-    /* Display large centered ASCII art logo */
-    int scale = 2;
-    int logo_width = 40 * 8 * scale;
-    int logo_height = KAGAMI_LOGO_LINES * 28;
-    unsigned int center_x = (width > (unsigned int)logo_width) ? (width - (unsigned int)logo_width) / 2 : 20;
-    unsigned int start_y = (height > (unsigned int)logo_height) ? (height - (unsigned int)logo_height) / 4 : 150;
 
-    for (int i = 0; i < KAGAMI_LOGO_LINES; i++) {
-        fb_print_scaled(fb, pitch, center_x, start_y, kagami_logo[i], 0x00FF00FF, scale);
-        start_y += 28;
+    int compact = (width < 800 || height < 600);
+    unsigned int start_y = 0;
+
+    if (compact) {
+        fb_print(fb, pitch, 20, 20, "Kagami OS Shell", 0x00FFFFFF);
+        fb_print(fb, pitch, 20, 34, "Type 'help' for commands", 0x00AAAAAA);
+        fb_print(fb, pitch, 20, 48, "Press ENTER to execute", 0x0088FFAA);
+        fb_print(fb, pitch, 20, 62, "========================================", 0x0088FF88);
+        start_y = 78;
+    } else {
+        /* Display large centered ASCII art logo */
+        int scale = 2;
+        int logo_width = 40 * 8 * scale;
+        int logo_height = KAGAMI_LOGO_LINES * 28;
+        unsigned int center_x = (width > (unsigned int)logo_width) ? (width - (unsigned int)logo_width) / 2 : 20;
+        start_y = (height > (unsigned int)logo_height) ? (height - (unsigned int)logo_height) / 4 : 150;
+
+        for (int i = 0; i < KAGAMI_LOGO_LINES; i++) {
+            fb_print_scaled(fb, pitch, center_x, start_y, kagami_logo[i], 0x00FF00FF, scale);
+            start_y += 28;
+        }
+        start_y += 22;
+        
+        /* Fantasy welcome message - centered */
+        fb_print_scaled(fb, pitch, center_x + 50, start_y, "~ The Mirror Awakens With Power ~", 0x00FFFF00, 2);
+        start_y += 35;
+        fb_print_scaled(fb, pitch, center_x + 25, start_y, "Enter Your Spells and Command", 0x00AAAAFF, 1);
+        start_y += 25;
+        fb_print(fb, pitch, center_x + 120, start_y, "Type 'help' or 'logo' to begin", 0x0088FFAA);
+        start_y += 35;
+        
+        /* Dividing line */
+        fb_print(fb, pitch, 40, start_y, "================================================================================", 0x0088FF88);
+        start_y += 25;
     }
-    start_y += 22;
-    
-    /* Fantasy welcome message - centered */
-    fb_print_scaled(fb, pitch, center_x + 50, start_y, "~ The Mirror Awakens With Power ~", 0x00FFFF00, 2);
-    start_y += 35;
-    fb_print_scaled(fb, pitch, center_x + 25, start_y, "Enter Your Spells and Command", 0x00AAAAFF, 1);
-    start_y += 25;
-    fb_print(fb, pitch, center_x + 120, start_y, "Type 'help' or 'logo' to begin", 0x0088FFAA);
-    start_y += 35;
-    
-    /* Dividing line */
-    fb_print(fb, pitch, 40, start_y, "================================================================================", 0x0088FF88);
-    start_y += 25;
     
     /* Initialize shell state */
     shell_state.pos = 0;
     shell_state.buffer[0] = 0;
-    shell_state.cursor_x = 50;
+    shell_state.cursor_x = compact ? 20 : 50;
     shell_state.cursor_y = start_y;
-    shell_state.line_height = 18;
+    shell_state.line_height = compact ? 12 : 18;
     shell_state.shift_pressed = 0;
     shell_state.scroll_offset = 0;
     
     serial_write("Unified framebuffer shell started with directory support\n");
+    KLOG("Shell: render complete");
     
     /* Main shell loop */
     while (1) {

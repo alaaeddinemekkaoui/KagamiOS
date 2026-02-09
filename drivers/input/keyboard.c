@@ -78,10 +78,7 @@ static const char scancode_to_ascii_upper[] = {
 #define SC_CAPSLOCK       0x3A
 
 unsigned char keyboard_wait_for_enter(void) {
-    const int timeout_loops = 5000000;
-    int loops = 0;
-
-    while (loops < timeout_loops) {
+    while (1) {
         unsigned char status = inb(PS2_STATUS_PORT);
         if (status & PS2_STATUS_OUTPUT_BUFFER) {
             unsigned char scancode = inb(PS2_DATA_PORT);
@@ -90,10 +87,7 @@ unsigned char keyboard_wait_for_enter(void) {
             }
         }
         for (volatile int i = 0; i < 1000; i++);
-        loops++;
     }
-
-    return '\n';
 }
 
 void keyboard_init(void) {

@@ -114,13 +114,12 @@ void kernel_main(void) {
     serial_write("Kernel: Keyboard driver initialized\n");
     KLOG("Kernel: Keyboard driver initialized");
 
-    idt_enable_interrupts();
-    serial_write("Kernel: Interrupts enabled\n");
-    KLOG("Kernel: Interrupts enabled");
-
+    KLOG("Storage: AHCI init");
     ahci_init();
+    KLOG("Storage: NVMe init");
     nvme_init();
 
+    KLOG("Network: init");
     net_init();
 
     static Ext4Fs root_fs;
@@ -139,26 +138,13 @@ void kernel_main(void) {
         }
     }
     
-    /* Wait for ENTER key using the buffered keyboard driver */
-    serial_write("Keyboard: Waiting for ENTER key (buffered mode)...\n");
-    KLOG("Keyboard: Waiting for ENTER key (buffered mode)...");
+    /* Wait for ENTER key by polling PS/2 controller */
+    serial_write("Keyboard: Waiting for ENTER key (polling mode)...\n");
+    KLOG("Keyboard: Waiting for ENTER key (polling mode)...");
     if (keyboard_has_controller()) {
-        const int timeout_loops = 3000000;
-        int loops = 0;
-        while (loops < timeout_loops) {
-            uint8_t ch = keyboard_getchar_nonblock();
-            if (ch == '\n' || ch == '\r') {
-                serial_write("Keyboard: ENTER pressed!\n");
-                KLOG("Keyboard: ENTER pressed!");
-                break;
-            }
-            for (volatile int i = 0; i < 1000; i++);
-            loops++;
-        }
-        if (loops >= timeout_loops) {
-            serial_write("Keyboard: timeout, auto-continue\n");
-            KERR("Keyboard: timeout, auto-continue");
-        }
+        keyboard_wait_for_enter();
+        serial_write("Keyboard: ENTER pressed!\n");
+        KLOG("Keyboard: ENTER pressed!");
     } else {
         serial_write("Keyboard: Not detected, auto-continue\n");
         KERR("Keyboard: Not detected, auto-continue");
@@ -168,6 +154,7 @@ void kernel_main(void) {
     serial_write("Display: Starting interactive shell...\n\n");
     KLOG("Kernel: Initialized successfully!");
     KLOG("Display: Starting interactive shell...");
+    klog_enable(0);
     
     /* Start interactive framebuffer shell with GPU rendering */
     /* Shell will display ASCII art logo and fantasy welcome message */
