@@ -1,5 +1,6 @@
 #include "ext4.h"
 #include "serial.h"
+#include "klog.h"
 
 #define EXT4_SUPERBLOCK_OFFSET 1024
 #define EXT4_EXTENTS_FL 0x00080000
@@ -656,6 +657,7 @@ int ext4_mount(Ext4Fs *fs, BlockDevice *dev, uint64_t partition_lba) {
 
     if (!read_superblock(dev, partition_lba, &fs->sb)) {
         serial_write("EXT4: invalid superblock\n");
+        KERR("EXT4: invalid superblock");
         return 0;
     }
 
@@ -663,6 +665,7 @@ int ext4_mount(Ext4Fs *fs, BlockDevice *dev, uint64_t partition_lba) {
     fs->partition_lba = partition_lba;
 
     serial_write("EXT4: superblock loaded\n");
+    KLOG("EXT4: superblock loaded");
     return 1;
 }
 

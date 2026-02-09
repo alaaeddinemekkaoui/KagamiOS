@@ -161,6 +161,7 @@ KERNEL_OBJS = \
 	$(BUILD_DIR)/shell.o \
 	$(BUILD_DIR)/vga_terminal.o \
 	$(BUILD_DIR)/serial.o \
+	$(BUILD_DIR)/klog.o \
 	$(BUILD_DIR)/framebuffer.o \
 	$(BUILD_DIR)/font.o \
 	$(BUILD_DIR)/block.o \

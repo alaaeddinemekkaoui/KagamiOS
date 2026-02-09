@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "klog.h"
 
 static KEYBOARD_STATE kb_state = {
     .read_pos = 0,
@@ -23,8 +24,33 @@ static inline void outb(unsigned short port, unsigned char value) {
 
 #define PS2_STATUS_OUTPUT_BUFFER 0x01
 #define PS2_STATUS_INPUT_BUFFER  0x02
-uint8_t keyboard_has_controller(void) {
+
+static int ps2_wait_input_clear(void) {
+    for (int i = 0; i < 100000; i++) {
+        if ((inb(PS2_STATUS_PORT) & PS2_STATUS_INPUT_BUFFER) == 0) {
+            return 1;
+        }
+    }
     return 0;
+}
+
+static int ps2_wait_output_full(void) {
+    for (int i = 0; i < 100000; i++) {
+        if (inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_BUFFER) {
+            return 1;
+        }
+    }
+    return 0;
+}
+uint8_t keyboard_has_controller(void) {
+    unsigned char status = inb(PS2_STATUS_PORT);
+
+    /* 0xFF is a common sign of a non-existent controller on x86 */
+    if (status == 0xFF) {
+        return 0;
+    }
+
+    return 1;
 }
 
 static const char scancode_to_ascii_lower[] = {
@@ -76,6 +102,52 @@ void keyboard_init(void) {
     kb_state.shift_pressed = 0;
     kb_state.ctrl_pressed = 0;
     kb_state.alt_pressed = 0;
+
+    /* Basic PS/2 controller init: enable port 1 and IRQ1, enable scanning */
+    if (!ps2_wait_input_clear()) {
+        KERR("PS2: input buffer busy");
+    }
+    outb(PS2_STATUS_PORT, 0xAD); /* Disable port 1 while configuring */
+
+    /* Flush output buffer */
+    if (inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_BUFFER) {
+        inb(PS2_DATA_PORT);
+    }
+
+    /* Read controller config byte */
+    if (!ps2_wait_input_clear()) {
+        KERR("PS2: input buffer busy before config read");
+    }
+    outb(PS2_STATUS_PORT, 0x20);
+    if (!ps2_wait_output_full()) {
+        KERR("PS2: no config byte");
+    }
+    unsigned char config = inb(PS2_DATA_PORT);
+
+    /* Enable IRQ1 (bit 0) and ensure port 1 clock is enabled (bit 4 cleared) */
+    config |= 0x01;
+    config &= (unsigned char)~0x10;
+
+    if (!ps2_wait_input_clear()) {
+        KERR("PS2: input buffer busy before config write");
+    }
+    outb(PS2_STATUS_PORT, 0x60);
+    if (!ps2_wait_input_clear()) {
+        KERR("PS2: input buffer busy on config write");
+    }
+    outb(PS2_DATA_PORT, config);
+
+    /* Enable port 1 */
+    if (!ps2_wait_input_clear()) {
+        KERR("PS2: input buffer busy before enable");
+    }
+    outb(PS2_STATUS_PORT, 0xAE);
+
+    /* Enable keyboard scanning */
+    if (!ps2_wait_input_clear()) {
+        KERR("PS2: input buffer busy before scan enable");
+    }
+    outb(PS2_DATA_PORT, 0xF4);
 }
 
 void keyboard_process_scancode(uint8_t scancode) {

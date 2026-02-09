@@ -2,6 +2,7 @@
 #include "block.h"
 #include "drivers/bus/pci.h"
 #include "serial.h"
+#include "klog.h"
 
 #define AHCI_CLASS 0x01
 #define AHCI_SUBCLASS 0x06
@@ -281,6 +282,7 @@ int ahci_init(void) {
     PciDevice dev;
     if (!pci_find_class(AHCI_CLASS, AHCI_SUBCLASS, AHCI_PROGIF, &dev)) {
         serial_write("AHCI: no controller found\n");
+        KERR("AHCI: no controller found");
         return 0;
     }
 
@@ -324,9 +326,11 @@ int ahci_init(void) {
         g_ahci_ready = 1;
         block_register(&g_ahci.dev);
         serial_write("AHCI: SATA device ready\n");
+        KLOG("AHCI: SATA device ready");
         return 1;
     }
 
     serial_write("AHCI: no SATA device found\n");
+    KERR("AHCI: no SATA device found");
     return 0;
 }

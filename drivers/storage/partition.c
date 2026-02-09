@@ -1,5 +1,6 @@
 #include "partition.h"
 #include "serial.h"
+#include "klog.h"
 
 #define GPT_HEADER_LBA 1
 #define GPT_ENTRIES_LBA 2
@@ -67,12 +68,14 @@ int gpt_find_linux_partition(BlockDevice *dev, PartitionInfo *out) {
     uint8_t header_buf[BLOCK_SECTOR_SIZE];
     if (!dev->read(dev, GPT_HEADER_LBA, 1, header_buf)) {
         serial_write("GPT: failed to read header\n");
+        KERR("GPT: failed to read header");
         return 0;
     }
 
     GptHeader *hdr = (GptHeader *)header_buf;
     if (hdr->signature != GPT_SIGNATURE) {
         serial_write("GPT: invalid signature\n");
+        KERR("GPT: invalid signature");
         return 0;
     }
 
@@ -94,6 +97,7 @@ int gpt_find_linux_partition(BlockDevice *dev, PartitionInfo *out) {
 
         if (!dev->read(dev, lba, 1, entry_buf)) {
             serial_write("GPT: failed to read entry\n");
+            KERR("GPT: failed to read entry");
             return 0;
         }
 
@@ -106,6 +110,7 @@ int gpt_find_linux_partition(BlockDevice *dev, PartitionInfo *out) {
             out->first_lba = entry->first_lba;
             out->last_lba = entry->last_lba;
             serial_write("GPT: found Linux filesystem partition\n");
+            KLOG("GPT: found Linux filesystem partition");
             return 1;
         }
     }
@@ -121,11 +126,13 @@ int mbr_find_linux_partition(BlockDevice *dev, PartitionInfo *out) {
     uint8_t mbr[BLOCK_SECTOR_SIZE];
     if (!dev->read(dev, 0, 1, mbr)) {
         serial_write("MBR: failed to read sector\n");
+        KERR("MBR: failed to read sector");
         return 0;
     }
 
     if (mbr[510] != 0x55 || mbr[511] != 0xAA) {
         serial_write("MBR: invalid signature\n");
+        KERR("MBR: invalid signature");
         return 0;
     }
 
@@ -135,6 +142,7 @@ int mbr_find_linux_partition(BlockDevice *dev, PartitionInfo *out) {
             out->first_lba = parts[i].lba_first;
             out->last_lba = parts[i].lba_first + parts[i].lba_count - 1;
             serial_write("MBR: found Linux partition\n");
+            KLOG("MBR: found Linux partition");
             return 1;
         }
     }
@@ -156,6 +164,7 @@ int find_linux_partition(BlockDevice *dev, PartitionInfo *out) {
     }
 
     serial_write("Partition: no Linux partition found\n");
+    KERR("Partition: no Linux partition found");
     return 0;
 }
 
@@ -177,5 +186,6 @@ int raw_find_ext4(BlockDevice *dev, PartitionInfo *out) {
     out->first_lba = 0;
     out->last_lba = dev->total_sectors ? dev->total_sectors - 1 : 0;
     serial_write("Partition: raw ext4 detected\n");
+    KLOG("Partition: raw ext4 detected");
     return 1;
 }

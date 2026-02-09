@@ -15,6 +15,7 @@
 #include "include/serial.h"
 #include "include/framebuffer.h"
 #include "include/ascii_art.h"
+#include "klog.h"
 
 void kernel_main(void) {
     serial_init();
@@ -72,6 +73,9 @@ void kernel_main(void) {
         } else {
             fb_print_scaled(fb, pitch, 20, msg_y, "No keyboard detected", 0x00FF8800, 1);
         }
+
+        klog_init_fb(fb, pitch, width, height);
+        KLOG("Framebuffer logger initialized");
         
     } else {
         serial_write("No framebuffer available, trying VGA\n");
@@ -91,16 +95,28 @@ void kernel_main(void) {
     }
     
     serial_write("Kernel: Waiting for ENTER to boot...\n");
+    KLOG("Kernel: Waiting for ENTER to boot...");
     
     /* Initialize kernel subsystems */
     heap_init();
     serial_write("Kernel: Heap initialized\n");
+    KLOG("Kernel: Heap initialized");
     
     idt_init();
     serial_write("Kernel: IDT initialized\n");
+    KLOG("Kernel: IDT initialized");
+
+    idt_load();
+    serial_write("Kernel: IDT loaded\n");
+    KLOG("Kernel: IDT loaded");
     
     keyboard_init();
     serial_write("Kernel: Keyboard driver initialized\n");
+    KLOG("Kernel: Keyboard driver initialized");
+
+    idt_enable_interrupts();
+    serial_write("Kernel: Interrupts enabled\n");
+    KLOG("Kernel: Interrupts enabled");
 
     ahci_init();
     nvme_init();
@@ -115,23 +131,43 @@ void kernel_main(void) {
             if (ext4_mount(&root_fs, dev, part.first_lba)) {
                 vfs_mount_ext4(&root_fs);
                 serial_write("EXT4: filesystem mounted\n");
+                KLOG("EXT4: filesystem mounted");
             } else {
                 serial_write("EXT4: mount failed\n");
+                KERR("EXT4: mount failed");
             }
         }
     }
     
-    /* Wait for ENTER key by directly polling PS/2 controller */
-    serial_write("Keyboard: Waiting for ENTER key (polling mode)...\n");
+    /* Wait for ENTER key using the buffered keyboard driver */
+    serial_write("Keyboard: Waiting for ENTER key (buffered mode)...\n");
+    KLOG("Keyboard: Waiting for ENTER key (buffered mode)...");
     if (keyboard_has_controller()) {
-        keyboard_wait_for_enter();
-        serial_write("Keyboard: ENTER pressed!\n");
+        const int timeout_loops = 3000000;
+        int loops = 0;
+        while (loops < timeout_loops) {
+            uint8_t ch = keyboard_getchar_nonblock();
+            if (ch == '\n' || ch == '\r') {
+                serial_write("Keyboard: ENTER pressed!\n");
+                KLOG("Keyboard: ENTER pressed!");
+                break;
+            }
+            for (volatile int i = 0; i < 1000; i++);
+            loops++;
+        }
+        if (loops >= timeout_loops) {
+            serial_write("Keyboard: timeout, auto-continue\n");
+            KERR("Keyboard: timeout, auto-continue");
+        }
     } else {
         serial_write("Keyboard: Not detected, auto-continue\n");
+        KERR("Keyboard: Not detected, auto-continue");
     }
     serial_write("Kernel: Initialized successfully!\n");
     serial_write("Framebuffer: Active\n");
     serial_write("Display: Starting interactive shell...\n\n");
+    KLOG("Kernel: Initialized successfully!");
+    KLOG("Display: Starting interactive shell...");
     
     /* Start interactive framebuffer shell with GPU rendering */
     /* Shell will display ASCII art logo and fantasy welcome message */

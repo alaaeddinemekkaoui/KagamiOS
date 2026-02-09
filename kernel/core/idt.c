@@ -199,10 +199,10 @@ static void pic_init(void) {
     __asm__ __volatile__("outb %%al, $0xA1" : : "a"((uint8_t)0x01));
     io_wait();
     
-    /* Restore saved masks (or unmask all) */
-    __asm__ __volatile__("outb %%al, $0x21" : : "a"((uint8_t)0x00));
+    /* Mask all IRQs except IRQ1 (keyboard) */
+    __asm__ __volatile__("outb %%al, $0x21" : : "a"((uint8_t)0xFD));
     io_wait();
-    __asm__ __volatile__("outb %%al, $0xA1" : : "a"((uint8_t)0x00));
+    __asm__ __volatile__("outb %%al, $0xA1" : : "a"((uint8_t)0xFF));
     io_wait();
 }
 
@@ -215,7 +215,8 @@ void idt_load(void) {
     
     /* Initialize and enable PIC */
     pic_init();
-    
-    /* Enable interrupts */
+}
+
+void idt_enable_interrupts(void) {
     __asm__ __volatile__("sti");
 }

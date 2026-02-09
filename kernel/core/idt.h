@@ -27,6 +27,7 @@ typedef void (*exception_handler_t)(void);
 void idt_init(void);
 void idt_set_descriptor(uint8_t vector, uint64_t handler, uint8_t flags);
 void idt_load(void);
+void idt_enable_interrupts(void);
 
 /* Exception codes */
 #define IDT_FLAGS_PRESENT     0x80

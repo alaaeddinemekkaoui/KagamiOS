@@ -363,48 +363,7 @@ static void fb_clear_rect(unsigned int* fb, unsigned int pitch, unsigned int wid
 
 /* Get single character from keyboard via polling */
 static char get_keyboard_char(void) {
-    unsigned char scancode;
-    int shift_pressed = 0;
-    
-    while (1) {
-        scancode = poll_keyboard();
-        
-        if (scancode > 0) {
-            /* Handle shift key */
-            if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
-                shift_pressed = 1;
-                continue;
-            }
-            if (scancode == 0xAA || scancode == 0xB6) {
-                shift_pressed = 0;
-                continue;
-            }
-            
-            /* Ignore key releases */
-            if (scancode & 0x80) {
-                continue;
-            }
-            
-            /* Handle backspace */
-            if (scancode == SC_BACKSPACE) {
-                return '\b';
-            }
-            
-            /* Handle enter */
-            if (scancode == 0x1C) {
-                return '\n';
-            }
-            
-            /* Convert to ASCII */
-            char c = scancode_to_char(scancode, shift_pressed);
-            if (c > 0) {
-                return c;
-            }
-        }
-        
-        /* Small delay to avoid busy-waiting */
-        for (volatile int i = 0; i < 1000; i++);
-    }
+    return (char)keyboard_getchar();
 }
 
 /* Render current input line to framebuffer */
