@@ -2416,54 +2416,55 @@ void fb_shell_run(BOOT_INFO* boot_info) {
     unsigned int pitch = boot_info->framebuffer_pitch;
     unsigned int width = boot_info->framebuffer_width;
     unsigned int height = boot_info->framebuffer_height;
+    unsigned int stride = pitch / 4;
+
+    char fb_info[128];
+    int fb_pos = 0;
+    append_str(fb_info, &fb_pos, "Shell FB: addr=0x");
+    append_hex(fb_info, &fb_pos, (uint32_t)((uint64_t)boot_info->framebuffer_addr >> 32), 8);
+    append_hex(fb_info, &fb_pos, (uint32_t)(boot_info->framebuffer_addr & 0xFFFFFFFF), 8);
+    append_str(fb_info, &fb_pos, " pitch=0x");
+    append_hex(fb_info, &fb_pos, pitch, 8);
+    append_str(fb_info, &fb_pos, " w=0x");
+    append_hex(fb_info, &fb_pos, width, 8);
+    append_str(fb_info, &fb_pos, " h=0x");
+    append_hex(fb_info, &fb_pos, height, 8);
+    fb_info[fb_pos] = 0;
+    serial_write(fb_info);
+    serial_write("\n");
+
+    if (width == 0 || height == 0 || pitch == 0) {
+        serial_write("Shell: invalid framebuffer params\n");
+        KERR("Shell: invalid framebuffer params");
+        return;
+    }
     
     /* Clear framebuffer */
-    for (unsigned int i = 0; i < (width * height); i++) {
-        fb[i] = 0x000000;
+    for (unsigned int y = 0; y < height; y++) {
+        unsigned int* row = fb + y * stride;
+        for (unsigned int x = 0; x < width; x++) {
+            row[x] = 0x000000;
+        }
     }
 
-    int compact = (width < 800 || height < 600);
     unsigned int start_y = 0;
 
-    if (compact) {
-        fb_print(fb, pitch, 20, 20, "Kagami OS Shell", 0x00FFFFFF);
-        fb_print(fb, pitch, 20, 34, "Type 'help' for commands", 0x00AAAAAA);
-        fb_print(fb, pitch, 20, 48, "Press ENTER to execute", 0x0088FFAA);
-        fb_print(fb, pitch, 20, 62, "========================================", 0x0088FF88);
-        start_y = 78;
-    } else {
-        /* Display large centered ASCII art logo */
-        int scale = 2;
-        int logo_width = 40 * 8 * scale;
-        int logo_height = KAGAMI_LOGO_LINES * 28;
-        unsigned int center_x = (width > (unsigned int)logo_width) ? (width - (unsigned int)logo_width) / 2 : 20;
-        start_y = (height > (unsigned int)logo_height) ? (height - (unsigned int)logo_height) / 4 : 150;
-
-        for (int i = 0; i < KAGAMI_LOGO_LINES; i++) {
-            fb_print_scaled(fb, pitch, center_x, start_y, kagami_logo[i], 0x00FF00FF, scale);
-            start_y += 28;
-        }
-        start_y += 22;
-        
-        /* Fantasy welcome message - centered */
-        fb_print_scaled(fb, pitch, center_x + 50, start_y, "~ The Mirror Awakens With Power ~", 0x00FFFF00, 2);
-        start_y += 35;
-        fb_print_scaled(fb, pitch, center_x + 25, start_y, "Enter Your Spells and Command", 0x00AAAAFF, 1);
-        start_y += 25;
-        fb_print(fb, pitch, center_x + 120, start_y, "Type 'help' or 'logo' to begin", 0x0088FFAA);
-        start_y += 35;
-        
-        /* Dividing line */
-        fb_print(fb, pitch, 40, start_y, "================================================================================", 0x0088FF88);
-        start_y += 25;
-    }
+    /* Simple shell header to guarantee visibility on all resolutions */
+    unsigned int left = (width > 60) ? 20 : 8;
+    unsigned int line = (height >= 720) ? 16 : 12;
+    unsigned int header_h = (height >= 720) ? 56 : 44;
+    fb_clear_rect(fb, pitch, width, 0, 0, width, header_h, 0x00202020);
+    fb_print_scaled(fb, pitch, left, 8, "Kagami OS Shell", 0x0000FF00, 2);
+    fb_print(fb, pitch, left, 8 + line * 3, "Type 'help' for commands", 0x00FFFFFF);
+    fb_print(fb, pitch, left, 8 + line * 4, "Press ENTER to execute", 0x00FFFFFF);
+    start_y = header_h + 6;
     
     /* Initialize shell state */
     shell_state.pos = 0;
     shell_state.buffer[0] = 0;
-    shell_state.cursor_x = compact ? 20 : 50;
+    shell_state.cursor_x = left;
     shell_state.cursor_y = start_y;
-    shell_state.line_height = compact ? 12 : 18;
+    shell_state.line_height = line;
     shell_state.shift_pressed = 0;
     shell_state.scroll_offset = 0;
     
@@ -2500,19 +2501,20 @@ void fb_shell_run(BOOT_INFO* boot_info) {
             if (shell_state.cursor_y > height - 80) {
                 /* Scroll up by copying framebuffer content upward */
                 unsigned int scroll_lines = 100;  /* Pixels to scroll */
-                unsigned int* fb_ptr = fb;
-                
                 /* Copy each line up by scroll_lines pixels */
                 for (unsigned int y = scroll_lines; y < height; y++) {
+                    unsigned int* dst = fb + (y - scroll_lines) * stride;
+                    unsigned int* src = fb + y * stride;
                     for (unsigned int x = 0; x < width; x++) {
-                        fb_ptr[(y - scroll_lines) * width + x] = fb_ptr[y * width + x];
+                        dst[x] = src[x];
                     }
                 }
                 
                 /* Clear the bottom portion that was scrolled up */
                 for (unsigned int y = height - scroll_lines; y < height; y++) {
+                    unsigned int* row = fb + y * stride;
                     for (unsigned int x = 0; x < width; x++) {
-                        fb_ptr[y * width + x] = 0x000000;
+                        row[x] = 0x000000;
                     }
                 }
                 
