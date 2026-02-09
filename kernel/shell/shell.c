@@ -1,9 +1,16 @@
 #include "shell.h"
 #include "include/framebuffer.h"
 #include "include/serial.h"
-#include "drivers/keyboard.h"
+#include "include/ascii_art.h"
+#include "commands_manual.h"
+#include "drivers/input/keyboard.h"
 #include "boot_info.h"
 #include "core/heap.h"
+#include "fs/vfs.h"
+#include "drivers/storage/block.h"
+#include "drivers/storage/partition.h"
+#include "drivers/bus/pci.h"
+#include "net/net.h"
 
 /* Simple macros for memory access */
 #define inb(port) ({ \
@@ -31,6 +38,7 @@ static const char scancode_ascii[] = {
 #define SC_LSHIFT    0x2A
 #define SC_RSHIFT    0x36
 #define SC_CTRL      0x1D
+#define SC_ESC       0x01
 
 /* User accounts system */
 typedef struct {
@@ -49,9 +57,10 @@ static char current_user[32] = "root";
 static char current_directory[64] = "/home/root";  /* Current directory */
 
 /* Virtual file system - files and folders */
+#define MAX_FILE_CONTENT 4096
 typedef struct {
     char name[32];
-    char content[256];
+    char content[MAX_FILE_CONTENT];
     int size;
     int is_folder;  /* 1 = folder, 0 = file */
     char parent[64]; /* Parent directory path */
@@ -65,6 +74,7 @@ static const VirtualFile initial_files[] = {
     {"readme.txt", "Welcome to Kagami OS! A magical realm of code.\nType 'ls' to explore.", 65, 0, "/home/root"},
     {"welcome.txt", "You have entered the Realm of Kagami.\nMay your code be swift and bug-free.", 70, 0, "/home/root"},
     {"spellbook.txt", "Available Spells:\n- help: Reveal all incantations\n- logo: Display realm emblem", 82, 0, "/home/root"},
+    {"COMMANDS.txt", "", 0, 0, "/home/root"},
     {"documents", "", 0, 1, "/home/root"},
     {"secret.txt", "The wizard guardian of this realm welcomes you!", 47, 0, "/home/root/documents"}
 };
@@ -73,6 +83,143 @@ static VirtualFile* file_system = 0;
 static int file_count = 0;
 static int file_capacity = 0;
 static int fs_initialized = 0;
+
+static void build_full_path(const char *name, char *out, int max_len) {
+    if (!name || !out || max_len <= 0) {
+        return;
+    }
+
+    if (name[0] == '/') {
+        int i = 0;
+        while (name[i] && i < max_len - 1) {
+            out[i] = name[i];
+            i++;
+        }
+        out[i] = 0;
+        return;
+    }
+
+    int pos = 0;
+    if (current_directory[0] == 0) {
+        out[pos++] = '/';
+    } else {
+        while (current_directory[pos] && pos < max_len - 1) {
+            out[pos] = current_directory[pos];
+            pos++;
+        }
+    }
+
+    if (pos == 0 || out[pos - 1] != '/') {
+        if (pos < max_len - 1) {
+            out[pos++] = '/';
+        }
+    }
+
+    int i = 0;
+    while (name[i] && pos < max_len - 1) {
+        out[pos++] = name[i++];
+    }
+    out[pos] = 0;
+}
+
+static char hex_digit(uint8_t v) {
+    return (v < 10) ? (char)('0' + v) : (char)('A' + (v - 10));
+}
+
+static void append_hex(char *buf, int *pos, uint32_t value, int digits) {
+    for (int i = digits - 1; i >= 0; i--) {
+        uint8_t nibble = (value >> (i * 4)) & 0xF;
+        buf[(*pos)++] = hex_digit(nibble);
+    }
+}
+
+static void append_str(char *buf, int *pos, const char *s) {
+    while (*s) {
+        buf[(*pos)++] = *s++;
+    }
+}
+
+static int str_len(const char* s) {
+    int n = 0;
+    while (s && s[n]) n++;
+    return n;
+}
+
+static void fs_load_manual(void) {
+    int manual_idx = -1;
+    for (int i = 0; i < file_count; i++) {
+        int match = 1;
+        const char* name = file_system[i].name;
+        const char* target = "COMMANDS.txt";
+        for (int j = 0; j < 32 && (name[j] || target[j]); j++) {
+            if (name[j] != target[j]) {
+                match = 0;
+                break;
+            }
+            if (name[j] == 0 && target[j] == 0) {
+                break;
+            }
+        }
+        if (match) {
+            manual_idx = i;
+            break;
+        }
+    }
+
+    if (manual_idx < 0) {
+        if (file_count + 1 > file_capacity) {
+            return;
+        }
+        manual_idx = file_count++;
+        file_system[manual_idx].is_folder = 0;
+        file_system[manual_idx].size = 0;
+        file_system[manual_idx].name[0] = 0;
+        file_system[manual_idx].parent[0] = 0;
+
+        const char* name = "COMMANDS.txt";
+        int n = 0;
+        while (name[n] && n < 31) {
+            file_system[manual_idx].name[n] = name[n];
+            n++;
+        }
+        file_system[manual_idx].name[n] = 0;
+
+        const char* parent = "/home/root";
+        n = 0;
+        while (parent[n] && n < 63) {
+            file_system[manual_idx].parent[n] = parent[n];
+            n++;
+        }
+        file_system[manual_idx].parent[n] = 0;
+    }
+
+    int idx = 0;
+    while (commands_manual[idx] && idx < MAX_FILE_CONTENT - 1) {
+        file_system[manual_idx].content[idx] = commands_manual[idx];
+        idx++;
+    }
+    file_system[manual_idx].content[idx] = 0;
+    file_system[manual_idx].size = idx;
+}
+
+static VirtualFile* fs_find_file_by_name(const char* name) {
+    for (int i = 0; i < file_count; i++) {
+        int match = 1;
+        for (int j = 0; j < 32 && (name[j] || file_system[i].name[j]); j++) {
+            if (name[j] != file_system[i].name[j]) {
+                match = 0;
+                break;
+            }
+            if (name[j] == 0 && file_system[i].name[j] == 0) {
+                break;
+            }
+        }
+        if (match) {
+            return &file_system[i];
+        }
+    }
+    return 0;
+}
 
 static void fs_init(void) {
     if (fs_initialized) {
@@ -101,6 +248,12 @@ static void fs_init(void) {
 
     file_count = initial_count;
     file_capacity = capacity;
+    for (int i = 0; i < file_count; i++) {
+        if (!file_system[i].is_folder) {
+            file_system[i].size = str_len(file_system[i].content);
+        }
+    }
+    fs_load_manual();
     fs_initialized = 1;
 }
 
@@ -142,21 +295,6 @@ static struct {
     unsigned int line_height;
     unsigned int scroll_offset;  /* Lines scrolled up */
 } shell_state = {0};
-
-static const char* command_menu[] = {
-    "================================================================================",
-    "                        KAGAMI OS - COMMAND REFERENCE",
-    "================================================================================",
-    "System: help, logo, status, whoami",
-    "Navigation: pwd, ls, tree, cd",
-    "File Ops: read, create, write, copy, find, rm",
-    "Utility: echo, clear",
-    "Users: useradd, login",
-    "",
-    "Tip: <command> -h or --help for details",
-    "================================================================================",
-    0
-};
 
 /* Poll PS/2 keyboard for any available scancode */
 static unsigned char poll_keyboard(void) {
@@ -342,6 +480,316 @@ static void get_dir_prompt(char* prompt_buf) {
     *ptr++ = ' ';
     *ptr = 0;
 }
+
+/* Clear full framebuffer and redraw minimal shell header */
+static void shell_clear_to_header(unsigned int* fb, unsigned int pitch, unsigned int width, unsigned int height) {
+    unsigned int* fb_start = fb;
+    for (unsigned int i = 0; i < (width * height); i++) {
+        fb_start[i] = 0x000000;
+    }
+
+    fb_print(fb, pitch, 20, 10, "KAGAMI OS - Type 'logo' for info", 0x0088FF88);
+    fb_print(fb, pitch, 20, 30, "=============================================", 0x0055AA55);
+    fb_print(fb, pitch, 20, 50, "[Screen cleared - Ready for new incantations]", 0x00AAAA00);
+    fb_print(fb, pitch, 20, 70, "Current path: ", 0x00888888);
+    fb_print(fb, pitch, 20 + (14 * 8), 70, current_directory, 0x0088FFFF);
+}
+
+/* Simple text editor/viewer for files */
+typedef struct {
+    char* buffer;
+    int length;
+    int cursor;
+    int scroll_line;
+    int insert_mode;
+    int dirty;
+    char status[64];
+} TextEditor;
+
+static void editor_set_status(TextEditor* ed, const char* msg) {
+    int i = 0;
+    while (msg[i] && i < 63) {
+        ed->status[i] = msg[i];
+        i++;
+    }
+    ed->status[i] = 0;
+}
+
+static void editor_get_cursor_line_col(const char* buf, int cursor, int* out_line, int* out_col) {
+    int line = 0;
+    int col = 0;
+    for (int i = 0; i < cursor; i++) {
+        if (buf[i] == '\n') {
+            line++;
+            col = 0;
+        } else {
+            col++;
+        }
+    }
+    *out_line = line;
+    *out_col = col;
+}
+
+static int editor_line_start(const char* buf, int cursor) {
+    int i = cursor;
+    while (i > 0 && buf[i - 1] != '\n') {
+        i--;
+    }
+    return i;
+}
+
+static int editor_line_end(const char* buf, int length, int cursor) {
+    int i = cursor;
+    while (i < length && buf[i] != '\n') {
+        i++;
+    }
+    return i;
+}
+
+static void editor_move_left(TextEditor* ed) {
+    if (ed->cursor > 0) ed->cursor--;
+}
+
+static void editor_move_right(TextEditor* ed) {
+    if (ed->cursor < ed->length) ed->cursor++;
+}
+
+static void editor_move_up(TextEditor* ed) {
+    int line_start = editor_line_start(ed->buffer, ed->cursor);
+    if (line_start == 0) return;
+    int col = ed->cursor - line_start;
+    int prev_end = line_start - 1;
+    int prev_start = prev_end;
+    while (prev_start > 0 && ed->buffer[prev_start - 1] != '\n') {
+        prev_start--;
+    }
+    int prev_len = prev_end - prev_start;
+    ed->cursor = prev_start + (col < prev_len ? col : prev_len);
+}
+
+static void editor_move_down(TextEditor* ed) {
+    int line_end = editor_line_end(ed->buffer, ed->length, ed->cursor);
+    if (line_end >= ed->length) return;
+    int line_start = editor_line_start(ed->buffer, ed->cursor);
+    int col = ed->cursor - line_start;
+    int next_start = line_end + 1;
+    int next_end = editor_line_end(ed->buffer, ed->length, next_start);
+    int next_len = next_end - next_start;
+    ed->cursor = next_start + (col < next_len ? col : next_len);
+}
+
+static void editor_insert_char(TextEditor* ed, char c) {
+    if (ed->length >= MAX_FILE_CONTENT - 1) {
+        editor_set_status(ed, "Buffer full");
+        return;
+    }
+    for (int i = ed->length; i > ed->cursor; i--) {
+        ed->buffer[i] = ed->buffer[i - 1];
+    }
+    ed->buffer[ed->cursor] = c;
+    ed->length++;
+    ed->cursor++;
+    ed->buffer[ed->length] = 0;
+    ed->dirty = 1;
+}
+
+static void editor_backspace(TextEditor* ed) {
+    if (ed->cursor <= 0) return;
+    for (int i = ed->cursor - 1; i < ed->length; i++) {
+        ed->buffer[i] = ed->buffer[i + 1];
+    }
+    ed->cursor--;
+    ed->length--;
+    ed->dirty = 1;
+}
+
+static void editor_render(unsigned int* fb, unsigned int pitch, unsigned int width, unsigned int height,
+                          const char* filename, TextEditor* ed) {
+    unsigned int* fb_start = fb;
+    for (unsigned int i = 0; i < (width * height); i++) {
+        fb_start[i] = 0x000000;
+    }
+
+    unsigned int top_y = 12;
+    unsigned int content_y = 50;
+    unsigned int footer_y = height - 22;
+    unsigned int left_x = 20;
+    unsigned int line_height = 16;
+    unsigned int max_cols = (width - left_x - 20) / 8;
+    unsigned int visible_lines = (footer_y - content_y) / line_height;
+
+    char title[80];
+    int t = 0;
+    const char* head = "KAGAMI EDITOR - ";
+    while (head[t]) {
+        title[t] = head[t];
+        t++;
+    }
+    int f = 0;
+    while (filename[f] && t < 78) {
+        title[t++] = filename[f++];
+    }
+    title[t] = 0;
+
+    fb_print(fb, pitch, 20, top_y, title, 0x00FFFF00);
+    fb_print(fb, pitch, 20, top_y + 18, ed->insert_mode ? "MODE: INSERT" : "MODE: NORMAL", 0x0088FFAA);
+
+    int cursor_line = 0;
+    int cursor_col = 0;
+    editor_get_cursor_line_col(ed->buffer, ed->cursor, &cursor_line, &cursor_col);
+
+    if (cursor_line < ed->scroll_line) {
+        ed->scroll_line = cursor_line;
+    } else if (cursor_line >= (int)(ed->scroll_line + visible_lines)) {
+        ed->scroll_line = cursor_line - (int)visible_lines + 1;
+    }
+    if (ed->scroll_line < 0) ed->scroll_line = 0;
+
+    int line = 0;
+    int col = 0;
+    unsigned int y = content_y;
+    for (int i = 0; i < ed->length; i++) {
+        char c = ed->buffer[i];
+        if (c == '\n') {
+            if (line >= ed->scroll_line && line < (int)(ed->scroll_line + visible_lines)) {
+                y += line_height;
+            }
+            line++;
+            col = 0;
+            continue;
+        }
+
+        if (line >= ed->scroll_line && line < (int)(ed->scroll_line + visible_lines)) {
+            if ((unsigned int)col < max_cols) {
+                fb_putchar(fb, pitch, left_x + (unsigned int)col * 8, y, c, 0x00FFFFFF);
+            }
+        }
+        col++;
+    }
+
+    if (cursor_line >= ed->scroll_line && cursor_line < (int)(ed->scroll_line + visible_lines)) {
+        unsigned int cx = left_x + (unsigned int)cursor_col * 8;
+        unsigned int cy = content_y + (unsigned int)(cursor_line - ed->scroll_line) * line_height;
+        fb_putchar(fb, pitch, cx, cy, ed->insert_mode ? '_' : '#', 0x00FFAA00);
+    }
+
+    fb_print(fb, pitch, 20, footer_y, "Ctrl+S Save  Ctrl+Q Quit  i Insert  ESC Normal  j/k Scroll", 0x0088FF88);
+    if (ed->status[0]) {
+        fb_print(fb, pitch, 20, footer_y - 14, ed->status, 0x00AAAAFF);
+    }
+}
+
+static unsigned char editor_get_scancode(int* shift_pressed, int* ctrl_pressed) {
+    unsigned char scancode;
+    while (1) {
+        scancode = poll_keyboard();
+        if (scancode == 0) {
+            for (volatile int i = 0; i < 1000; i++);
+            continue;
+        }
+
+        if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
+            *shift_pressed = 1;
+            continue;
+        }
+        if (scancode == 0xAA || scancode == 0xB6) {
+            *shift_pressed = 0;
+            continue;
+        }
+        if (scancode == SC_CTRL) {
+            *ctrl_pressed = 1;
+            continue;
+        }
+        if (scancode == 0x9D) {
+            *ctrl_pressed = 0;
+            continue;
+        }
+        if (scancode & 0x80) {
+            continue;
+        }
+        return scancode;
+    }
+}
+
+static void open_text_editor(unsigned int* fb, unsigned int pitch, unsigned int width, unsigned int height,
+                             VirtualFile* file) {
+    TextEditor ed;
+    ed.buffer = file->content;
+    ed.length = str_len(file->content);
+    ed.cursor = ed.length;
+    ed.scroll_line = 0;
+    ed.insert_mode = 0;
+    ed.dirty = 0;
+    ed.status[0] = 0;
+
+    int shift_pressed = 0;
+    int ctrl_pressed = 0;
+
+    for (;;) {
+        editor_render(fb, pitch, width, height, file->name, &ed);
+        unsigned char scancode = editor_get_scancode(&shift_pressed, &ctrl_pressed);
+
+        if (scancode == SC_ESC) {
+            ed.insert_mode = 0;
+            editor_set_status(&ed, "Normal mode");
+            continue;
+        }
+
+        if (scancode == SC_BACKSPACE) {
+            if (ed.insert_mode) {
+                editor_backspace(&ed);
+            }
+            continue;
+        }
+
+        if (scancode == 0x1C) {
+            if (ed.insert_mode) {
+                editor_insert_char(&ed, '\n');
+            }
+            continue;
+        }
+
+        char c = scancode_to_char(scancode, shift_pressed);
+        if (c == 0) {
+            continue;
+        }
+
+        if (ctrl_pressed && (c == 's' || c == 'S')) {
+            file->size = ed.length;
+            editor_set_status(&ed, ed.dirty ? "Saved" : "No changes");
+            ed.dirty = 0;
+            continue;
+        }
+
+        if (ctrl_pressed && (c == 'q' || c == 'Q')) {
+            break;
+        }
+
+        if (!ed.insert_mode) {
+            if (c == 'i') {
+                ed.insert_mode = 1;
+                editor_set_status(&ed, "Insert mode");
+            } else if (c == 'h') {
+                editor_move_left(&ed);
+            } else if (c == 'l') {
+                editor_move_right(&ed);
+            } else if (c == 'k') {
+                editor_move_up(&ed);
+            } else if (c == 'j') {
+                editor_move_down(&ed);
+            } else if (c == 'q') {
+                break;
+            }
+            continue;
+        }
+
+        if (ed.insert_mode) {
+            editor_insert_char(&ed, c);
+        }
+    }
+
+    file->size = ed.length;
+}
 /* Execute shell command and return output to display */
 static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int width, unsigned int height) {
     char* cmd = shell_state.buffer;
@@ -362,9 +810,15 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         char* arg = cmd + 4;
         while (*arg == ' ') arg++;
         if ((arg[0] == '-' && arg[1] == 'm') ||
-            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'm' && arg[3] == 'e' && arg[4] == 'n' && arg[5] == 'u')) {
-            for (int i = 0; command_menu[i]; i++) {
-                fb_print(fb, pitch, 70, shell_state.cursor_y, command_menu[i], 0x0088FF88);
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'm' && arg[3] == 'a' && arg[4] == 'n' && arg[5] == 'u' && arg[6] == 'a' && arg[7] == 'l')) {
+            VirtualFile* manual = fs_find_file_by_name("COMMANDS.txt");
+            if (manual && !manual->is_folder) {
+                open_text_editor(fb, pitch, width, height, manual);
+                shell_clear_to_header(fb, pitch, width, height);
+                shell_state.cursor_y = 95;
+                shell_state.scroll_offset = 0;
+            } else {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Manual not found", 0x00FF4444);
                 shell_state.cursor_y += shell_state.line_height + 3;
             }
             return;
@@ -379,13 +833,15 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             shell_state.cursor_y += shell_state.line_height + 3;
             fb_print(fb, pitch, 90, shell_state.cursor_y, "<cmd> --help - Show help for specific command", 0x00CCCCCC);
             shell_state.cursor_y += shell_state.line_height + 3;
-            fb_print(fb, pitch, 90, shell_state.cursor_y, "help -m / --menu - Show command reference", 0x00CCCCCC);
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "help -m / --manual - Open command manual", 0x00CCCCCC);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
         fb_print(fb, pitch, 70, shell_state.cursor_y, "~ Spellbook of Incantations ~", 0x00FFFF);
         shell_state.cursor_y += shell_state.line_height + 5;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "help       - Display mystical guide", 0x00CCCCCC);
+        shell_state.cursor_y += shell_state.line_height + 3;
+        fb_print(fb, pitch, 90, shell_state.cursor_y, "manual     - Open command manual", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "logo       - Display realm emblem & info", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
@@ -398,6 +854,8 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         fb_print(fb, pitch, 90, shell_state.cursor_y, "cd <folder> - Enter sacred chamber", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "read <file> - Read scroll contents", 0x00CCCCCC);
+        shell_state.cursor_y += shell_state.line_height + 3;
+        fb_print(fb, pitch, 90, shell_state.cursor_y, "edit <file> - Open scroll in editor", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "create <name> - Create file/folder (add / for folder)", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
@@ -419,17 +877,47 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 90, shell_state.cursor_y, "login <u>  - Become seeker", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
-        fb_print(fb, pitch, 90, shell_state.cursor_y, "clear      - Refresh realm", 0x00CCCCCC);
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "disks      - Detect storage devices", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 2;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "partcheck  - Verify partitions", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 2;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "pci        - List PCI devices", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 2;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "ip         - Show/set IP config", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 2;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "ping <ip>  - ICMP echo", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 2;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "whoami     - Your identity", 0x00CCCCCC);
         shell_state.cursor_y += shell_state.line_height + 3;
         fb_print(fb, pitch, 70, shell_state.cursor_y, "Tip: Use '<cmd> -h' or '<cmd> --help' for detailed info", 0x00FFAA00);
         shell_state.cursor_y += shell_state.line_height + 3;
         return;
     }
 
-    /* === MENU COMMAND (command reference) === */
-    if (cmd[0] == 'm' && cmd[1] == 'e' && cmd[2] == 'n' && cmd[3] == 'u') {
-        for (int i = 0; command_menu[i]; i++) {
-            fb_print(fb, pitch, 70, shell_state.cursor_y, command_menu[i], 0x0088FF88);
+    /* === MANUAL COMMAND (open command reference) === */
+    if ((cmd[0] == 'm' && cmd[1] == 'a' && cmd[2] == 'n' && (cmd[3] == 0 || cmd[3] == ' ')) ||
+        (cmd[0] == 'm' && cmd[1] == 'a' && cmd[2] == 'n' && cmd[3] == 'u' && cmd[4] == 'a' && cmd[5] == 'l')) {
+        char* arg = cmd + 3;
+        if (cmd[3] == 'u') {
+            arg = cmd + 6;
+        }
+        while (*arg == ' ') arg++;
+        if ((arg[0] == '-' && arg[1] == 'h') ||
+            (arg[0] == '-' && arg[1] == '-' && arg[2] == 'h' && arg[3] == 'e' && arg[4] == 'l' && arg[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Manual Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "manual / man  - Open command manual", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        VirtualFile* manual = fs_find_file_by_name("COMMANDS.txt");
+        if (manual && !manual->is_folder) {
+            open_text_editor(fb, pitch, width, height, manual);
+            shell_clear_to_header(fb, pitch, width, height);
+            shell_state.cursor_y = 95;
+            shell_state.scroll_offset = 0;
+        } else {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Manual not found", 0x00FF4444);
             shell_state.cursor_y += shell_state.line_height + 3;
         }
         return;
@@ -449,18 +937,8 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
-        /* Clear framebuffer */
-        unsigned int* fb_start = fb;
-        for (unsigned int i = 0; i < (width * height); i++) {
-            fb_start[i] = 0x000000;
-        }
-        
-        /* Redraw minimal header with status */
-        fb_print(fb, pitch, 20, 10, "KAGAMI OS - Type 'logo' for info", 0x0088FF88);
-        fb_print(fb, pitch, 20, 30, "=============================================", 0x0055AA55);
-        fb_print(fb, pitch, 20, 50, "[Screen cleared - Ready for new incantations]", 0x00AAAA00);
-        fb_print(fb, pitch, 20, 70, "Current path: ", 0x00888888);
-        fb_print(fb, pitch, 20 + (14 * 8), 70, current_directory, 0x0088FFFF);
+        /* Clear framebuffer and redraw header */
+        shell_clear_to_header(fb, pitch, width, height);
         
         /* Reset cursor and scrolling */
         shell_state.cursor_y = 95;
@@ -470,6 +948,176 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         return;
     }
     
+    /* === DISKS COMMAND === */
+    if (cmd[0] == 'd' && cmd[1] == 'i' && cmd[2] == 's' && cmd[3] == 'k' && cmd[4] == 's') {
+        int count = block_count();
+        if (count == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "No disks detected", 0x00FF9999);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+
+        for (int i = 0; i < count; i++) {
+            BlockDevice *dev = block_get(i);
+            if (dev && dev->name) {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, dev->name, 0x0088FF88);
+                shell_state.cursor_y += shell_state.line_height + 3;
+            }
+        }
+        return;
+    }
+
+    /* === PARTCHECK COMMAND === */
+    if (cmd[0] == 'p' && cmd[1] == 'a' && cmd[2] == 'r' && cmd[3] == 't' && cmd[4] == 'c' && cmd[5] == 'h' && cmd[6] == 'e' && cmd[7] == 'c' && cmd[8] == 'k') {
+        int count = block_count();
+        if (count == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "No disks detected", 0x00FF9999);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+
+        int found_any = 0;
+        for (int i = 0; i < count; i++) {
+            BlockDevice *dev = block_get(i);
+            PartitionInfo part;
+            if (dev && find_linux_partition(dev, &part)) {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Linux partition OK", 0x0088FF88);
+                shell_state.cursor_y += shell_state.line_height + 3;
+                found_any = 1;
+            }
+        }
+
+        if (!found_any) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "No Linux partition found", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        }
+        return;
+    }
+
+    /* === PCI COMMAND === */
+    if (cmd[0] == 'p' && cmd[1] == 'c' && cmd[2] == 'i') {
+        PciDevice list[64];
+        int count = pci_enumerate(list, 64);
+        if (count <= 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "No PCI devices", 0x00FF9999);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+
+        int limit = count;
+        if (limit > 64) {
+            limit = 64;
+        }
+
+        for (int i = 0; i < limit; i++) {
+            char line[64];
+            int pos = 0;
+            append_hex(line, &pos, list[i].bus, 2);
+            line[pos++] = ':';
+            append_hex(line, &pos, list[i].slot, 2);
+            line[pos++] = '.';
+            append_hex(line, &pos, list[i].func, 1);
+            line[pos++] = ' ';
+            append_str(line, &pos, "ven=");
+            append_hex(line, &pos, list[i].vendor_id, 4);
+            line[pos++] = ' ';
+            append_str(line, &pos, "dev=");
+            append_hex(line, &pos, list[i].device_id, 4);
+            line[pos++] = ' ';
+            append_str(line, &pos, "cls=");
+            append_hex(line, &pos, list[i].class_code, 2);
+            line[pos++] = ':';
+            append_hex(line, &pos, list[i].subclass, 2);
+            line[pos++] = ':';
+            append_hex(line, &pos, list[i].prog_if, 2);
+            line[pos] = 0;
+
+            fb_print(fb, pitch, 70, shell_state.cursor_y, line, 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        }
+        return;
+    }
+
+    /* === IP COMMAND === */
+    if (cmd[0] == 'i' && cmd[1] == 'p') {
+        char* arg = cmd + 2;
+        while (*arg == ' ') arg++;
+
+        if (arg[0] == 0) {
+            uint32_t ip, mask, gw;
+            char ip_str[16], mask_str[16], gw_str[16];
+            net_get_ip(&ip, &mask, &gw);
+            net_ip_to_str(ip, ip_str, sizeof(ip_str));
+            net_ip_to_str(mask, mask_str, sizeof(mask_str));
+            net_ip_to_str(gw, gw_str, sizeof(gw_str));
+
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "IP:", 0x00AAAAFF);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, ip_str, 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "MASK:", 0x00AAAAFF);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, mask_str, 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "GW:", 0x00AAAAFF);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, gw_str, 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+
+        if (arg[0] == 's' && arg[1] == 'e' && arg[2] == 't') {
+            arg += 3;
+            while (*arg == ' ') arg++;
+
+            char ip_s[16], mask_s[16], gw_s[16];
+            int idx = 0;
+            while (*arg && *arg != ' ' && idx < 15) ip_s[idx++] = *arg++;
+            ip_s[idx] = 0;
+            while (*arg == ' ') arg++;
+            idx = 0;
+            while (*arg && *arg != ' ' && idx < 15) mask_s[idx++] = *arg++;
+            mask_s[idx] = 0;
+            while (*arg == ' ') arg++;
+            idx = 0;
+            while (*arg && *arg != ' ' && idx < 15) gw_s[idx++] = *arg++;
+            gw_s[idx] = 0;
+
+            uint32_t ip, mask, gw;
+            if (!net_parse_ipv4(ip_s, &ip) || !net_parse_ipv4(mask_s, &mask) || !net_parse_ipv4(gw_s, &gw)) {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: ip set <ip> <mask> <gw>", 0x00FFAA00);
+                shell_state.cursor_y += shell_state.line_height + 3;
+                return;
+            }
+            net_set_ip(ip, mask, gw);
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "IP updated", 0x0088FF88);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+
+        fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: ip [set <ip> <mask> <gw>]", 0x00FFAA00);
+        shell_state.cursor_y += shell_state.line_height + 3;
+        return;
+    }
+
+    /* === PING COMMAND === */
+    if (cmd[0] == 'p' && cmd[1] == 'i' && cmd[2] == 'n' && cmd[3] == 'g') {
+        char* target = cmd + 4;
+        while (*target == ' ') target++;
+        if (target[0] == 0) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Usage: ping <ip>", 0x00FFAA00);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+        if (net_ping(target)) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Ping OK", 0x0088FF88);
+        } else {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Ping failed", 0x00FF4444);
+        }
+        shell_state.cursor_y += shell_state.line_height + 3;
+        return;
+    }
+
     /* === LOGO COMMAND === */
     if (cmd[0] == 'l' && cmd[1] == 'o' && cmd[2] == 'g' && cmd[3] == 'o') {
         char* arg = cmd + 4;
@@ -484,18 +1132,12 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
-        fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, "  _  __   _    ____    _    __  __ ___", 0x00FF00FF, 2);
-        shell_state.cursor_y += 28;
-        fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, " | |/ /  / \\  / ___|  / \\  |  \\/  |_ _|", 0x00FF00FF, 2);
-        shell_state.cursor_y += 28;
-        fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, " | ' /  / _ \\| |  _  / _ \\ | |\\/| || |", 0x00FF00FF, 2);
-        shell_state.cursor_y += 28;
-        fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, " | . \\ / ___ \\ |_| |/ ___ \\| |  | || |", 0x00FF00FF, 2);
-        shell_state.cursor_y += 28;
-        fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, " |_|\\_\\_/   \\_\\____/_/   \\_\\_|  |_|___|", 0x00FF00FF, 2);
-        shell_state.cursor_y += 40;
-        fb_print_scaled(fb, pitch, 250, shell_state.cursor_y, "K A G A M I   O S", 0x00FFFF00, 2);
-        shell_state.cursor_y += 30;
+        int logo_scale = 2;
+        for (int i = 0; i < KAGAMI_LOGO_LINES; i++) {
+            fb_print_scaled(fb, pitch, 150, shell_state.cursor_y, kagami_logo[i], 0x00FF00FF, logo_scale);
+            shell_state.cursor_y += 28;
+        }
+        shell_state.cursor_y += 12;
         fb_print(fb, pitch, 350, shell_state.cursor_y, "Version: 0.1 'Awakening'", 0x00AAAAFF);
         shell_state.cursor_y += 20;
         fb_print(fb, pitch, 350, shell_state.cursor_y, "Kernel: 64-bit UEFI", 0x00AAAAFF);
@@ -521,6 +1163,33 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
+        if (vfs_is_mounted()) {
+            char list_buf[2048];
+            if (vfs_list_dir(current_directory, list_buf, sizeof(list_buf))) {
+                const char *p = list_buf;
+                while (*p) {
+                    char name[64];
+                    int n = 0;
+                    while (*p && *p != '\n' && n < (int)sizeof(name) - 1) {
+                        name[n++] = *p++;
+                    }
+                    name[n] = 0;
+                    if (*p == '\n') {
+                        p++;
+                    }
+
+                    if (n > 0) {
+                        fb_print(fb, pitch, 70, shell_state.cursor_y, name, 0x0088FF88);
+                        shell_state.cursor_y += shell_state.line_height + 3;
+                    }
+                }
+            } else {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Failed to list directory", 0x00FF9999);
+                shell_state.cursor_y += shell_state.line_height + 5;
+            }
+            return;
+        }
+
         int dir_files = 0;
         for (int i = 0; i < file_count; i++) {
             /* Check if file is in current directory - exact match only */
@@ -667,6 +1336,26 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             return;
         }
         
+        if (vfs_is_mounted()) {
+            char target[128];
+            build_full_path(dirname, target, sizeof(target));
+            char list_buf[256];
+            if (vfs_list_dir(target, list_buf, sizeof(list_buf))) {
+                int i = 0;
+                while (target[i] && i < (int)sizeof(current_directory) - 1) {
+                    current_directory[i] = target[i];
+                    i++;
+                }
+                current_directory[i] = 0;
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Directory changed", 0x0088FF88);
+                shell_state.cursor_y += shell_state.line_height + 3;
+            } else {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Chamber not found!", 0x00FF4444);
+                shell_state.cursor_y += shell_state.line_height + 3;
+            }
+            return;
+        }
+
         /* Find directory */
         int found = -1;
         for (int i = 0; i < file_count; i++) {
@@ -728,13 +1417,29 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             (filename[0] == '-' && filename[1] == '-' && filename[2] == 'h' && filename[3] == 'e' && filename[4] == 'l' && filename[5] == 'p')) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Read Command Usage:", 0x00FFFF00);
             shell_state.cursor_y += shell_state.line_height + 5;
-            fb_print(fb, pitch, 90, shell_state.cursor_y, "read <file>  - Display contents of file", 0x00CCCCCC);
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "read <file>  - Open file in editor", 0x00CCCCCC);
             shell_state.cursor_y += shell_state.line_height + 3;
             fb_print(fb, pitch, 90, shell_state.cursor_y, "Example: read readme.txt", 0x00CCCCCC);
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
         
+        if (vfs_is_mounted()) {
+            char path[128];
+            build_full_path(filename, path, sizeof(path));
+            char file_buf[1024];
+            uint32_t read_size = 0;
+            if (vfs_read_file(path, file_buf, sizeof(file_buf) - 1, &read_size)) {
+                file_buf[read_size] = 0;
+                fb_print(fb, pitch, 70, shell_state.cursor_y, file_buf, 0x00CCCCFF);
+                shell_state.cursor_y += shell_state.line_height + 5;
+            } else {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "File not found", 0x00FF4444);
+                shell_state.cursor_y += shell_state.line_height + 3;
+            }
+            return;
+        }
+
         int found = 0;
         for (int i = 0; i < file_count; i++) {
             int match = 1;
@@ -748,15 +1453,65 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             if (match) {
                 if (file_system[i].is_folder) {
                     fb_print(fb, pitch, 70, shell_state.cursor_y, "This is sacred chamber, not a scroll!", 0x00FF9999);
+                    shell_state.cursor_y += shell_state.line_height + 3;
                 } else {
-                    fb_print(fb, pitch, 70, shell_state.cursor_y, file_system[i].content, 0x0088FFFF);
+                    open_text_editor(fb, pitch, width, height, &file_system[i]);
+                    shell_clear_to_header(fb, pitch, width, height);
+                    shell_state.cursor_y = 95;
+                    shell_state.scroll_offset = 0;
                 }
-                shell_state.cursor_y += shell_state.line_height + 3;
                 found = 1;
                 break;
             }
         }
         
+        if (!found) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Scroll not found...", 0x00FF4444);
+            shell_state.cursor_y += shell_state.line_height + 3;
+        }
+        return;
+    }
+
+    /* === EDIT COMMAND (open editor) === */
+    if (cmd[0] == 'e' && cmd[1] == 'd' && cmd[2] == 'i' && cmd[3] == 't') {
+        char* filename = cmd + 4;
+        while (*filename == ' ') filename++;
+
+        if ((filename[0] == '-' && filename[1] == 'h') ||
+            (filename[0] == '-' && filename[1] == '-' && filename[2] == 'h' && filename[3] == 'e' && filename[4] == 'l' && filename[5] == 'p')) {
+            fb_print(fb, pitch, 70, shell_state.cursor_y, "Edit Command Usage:", 0x00FFFF00);
+            shell_state.cursor_y += shell_state.line_height + 5;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "edit <file>  - Open file in editor", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            fb_print(fb, pitch, 90, shell_state.cursor_y, "Keys: i=insert, ESC=normal, Ctrl+S=save, Ctrl+Q=quit", 0x00CCCCCC);
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
+
+        int found = 0;
+        for (int i = 0; i < file_count; i++) {
+            int match = 1;
+            for (int j = 0; j < 32 && filename[j] && file_system[i].name[j]; j++) {
+                if (filename[j] != file_system[i].name[j]) {
+                    match = 0;
+                    break;
+                }
+            }
+            if (match) {
+                if (file_system[i].is_folder) {
+                    fb_print(fb, pitch, 70, shell_state.cursor_y, "This is sacred chamber, not a scroll!", 0x00FF9999);
+                    shell_state.cursor_y += shell_state.line_height + 3;
+                } else {
+                    open_text_editor(fb, pitch, width, height, &file_system[i]);
+                    shell_clear_to_header(fb, pitch, width, height);
+                    shell_state.cursor_y = 95;
+                    shell_state.scroll_offset = 0;
+                }
+                found = 1;
+                break;
+            }
+        }
+
         if (!found) {
             fb_print(fb, pitch, 70, shell_state.cursor_y, "Scroll not found...", 0x00FF4444);
             shell_state.cursor_y += shell_state.line_height + 3;
@@ -1132,6 +1887,18 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
             shell_state.cursor_y += shell_state.line_height + 3;
             return;
         }
+
+        if (vfs_is_mounted()) {
+            char path[128];
+            build_full_path(filename, path, sizeof(path));
+            if (vfs_write_file(path, args, (uint32_t)str_len(args))) {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "File written", 0x0088FF88);
+            } else {
+                fb_print(fb, pitch, 70, shell_state.cursor_y, "Write failed", 0x00FF4444);
+            }
+            shell_state.cursor_y += shell_state.line_height + 3;
+            return;
+        }
         
         /* Find file */
         int found = -1;
@@ -1156,7 +1923,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         if (found >= 0) {
             /* Write to file */
             int idx = 0;
-            while (*args && idx < 255) {
+            while (*args && idx < MAX_FILE_CONTENT - 1) {
                 file_system[found].content[idx++] = *args++;
             }
             file_system[found].content[idx] = 0;
@@ -1248,7 +2015,7 @@ static void execute_command(unsigned int* fb, unsigned int pitch, unsigned int w
         file_system[file_count].name[d] = 0;
         
         int c = 0;
-        while (file_system[src_idx].content[c] && c < 255) {
+        while (file_system[src_idx].content[c] && c < MAX_FILE_CONTENT - 1) {
             file_system[file_count].content[c] = file_system[src_idx].content[c];
             c++;
         }
@@ -1653,19 +2420,17 @@ void fb_shell_run(BOOT_INFO* boot_info) {
     }
     
     /* Display large centered ASCII art logo */
-    unsigned int center_x = (width / 2) - 350;
-    unsigned int start_y = 150;
-    
-    fb_print_scaled(fb, pitch, center_x, start_y, "  _  __   _    ____    _    __  __ ___", 0x00FF00FF, 2);
-    start_y += 28;
-    fb_print_scaled(fb, pitch, center_x, start_y, " | |/ /  / \\  / ___|  / \\  |  \\/  |_ _|", 0x00FF00FF, 2);
-    start_y += 28;
-    fb_print_scaled(fb, pitch, center_x, start_y, " | ' /  / _ \\| |  _  / _ \\ | |\\/| || |", 0x00FF00FF, 2);
-    start_y += 28;
-    fb_print_scaled(fb, pitch, center_x, start_y, " | . \\ / ___ \\ |_| |/ ___ \\| |  | || |", 0x00FF00FF, 2);
-    start_y += 28;
-    fb_print_scaled(fb, pitch, center_x, start_y, " |_|\\_\\_/   \\_\\____/_/   \\_\\_|  |_|___|", 0x00FF00FF, 2);
-    start_y += 50;
+    int scale = 2;
+    int logo_width = 40 * 8 * scale;
+    int logo_height = KAGAMI_LOGO_LINES * 28;
+    unsigned int center_x = (width > (unsigned int)logo_width) ? (width - (unsigned int)logo_width) / 2 : 20;
+    unsigned int start_y = (height > (unsigned int)logo_height) ? (height - (unsigned int)logo_height) / 4 : 150;
+
+    for (int i = 0; i < KAGAMI_LOGO_LINES; i++) {
+        fb_print_scaled(fb, pitch, center_x, start_y, kagami_logo[i], 0x00FF00FF, scale);
+        start_y += 28;
+    }
+    start_y += 22;
     
     /* Fantasy welcome message - centered */
     fb_print_scaled(fb, pitch, center_x + 50, start_y, "~ The Mirror Awakens With Power ~", 0x00FFFF00, 2);

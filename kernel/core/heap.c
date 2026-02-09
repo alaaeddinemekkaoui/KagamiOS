@@ -22,10 +22,7 @@ static HEAP_STATE heap = {
 };
 
 void heap_init(void) {
-    /* Clear heap memory */
-    for (size_t i = 0; i < HEAP_SIZE; i++) {
-        heap.heap_start[i] = 0;
-    }
+    /* Avoid touching unmapped memory early; just reset pointers */
     heap.heap_ptr = heap.heap_start;
     heap.used = 0;
 }

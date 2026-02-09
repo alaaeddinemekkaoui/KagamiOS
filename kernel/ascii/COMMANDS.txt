@@ -2,7 +2,7 @@
                         KAGAMI OS - COMMAND REFERENCE
 ================================================================================
 
-Total Commands: 18
+Total Commands: 24
 
 ================================================================================
                             SYSTEM INFORMATION
@@ -11,6 +11,12 @@ Total Commands: 18
 help
     Display this command list with brief descriptions
     Usage: help
+    Supports: -h, --help
+
+manual
+    Open the full command manual in the editor
+    Usage: manual
+    Aliases: man
     Supports: -h, --help
 
 logo
@@ -120,6 +126,32 @@ echo <text>
     Example: echo Hello World
     Supports: -h, --help
 
+disks
+    Detect storage devices
+    Usage: disks
+    Lists block devices found by drivers
+
+partcheck
+    Verify GPT/MBR Linux partition
+    Usage: partcheck
+    Confirms partition discovery
+
+pci
+    List PCI devices
+    Usage: pci
+    Shows bus:slot.func and class codes
+
+ip
+    Show or set IP configuration
+    Usage: ip
+           ip set <ip> <mask> <gw>
+    Example: ip set 10.0.2.15 255.255.255.0 10.0.2.2
+
+ping <ip>
+    Send ICMP echo request
+    Usage: ping <ip>
+    Example: ping 10.0.2.2
+
 clear
     Clear screen and show minimal header
     Usage: clear
@@ -153,11 +185,14 @@ login <username>
 All commands support detailed help:
     <command> -h        - Show command help
     <command> --help    - Show command help
+    help -m             - Open command manual
+    help --manual       - Open command manual
 
 Examples:
     ls -h
     create --help
     pwd -h
+    help -m
 
 ================================================================================
                           FILE SYSTEM STRUCTURE
@@ -180,7 +215,7 @@ User Home Directories:
 Maximum Limits:
     - Total files/folders: limited by heap memory (default ~1MB)
     - Filename length: 32 characters
-    - File content: 256 characters
+    - File content: 4096 characters
     - Parent path: 64 characters
 
 ================================================================================

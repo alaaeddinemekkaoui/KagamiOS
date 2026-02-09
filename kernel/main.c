@@ -2,7 +2,14 @@
 #include "boot_info.h"
 #include "shell/shell.h"
 #include "core/heap.h"
-#include "drivers/keyboard.h"
+#include "drivers/input/keyboard.h"
+#include "drivers/storage/ahci.h"
+#include "drivers/storage/nvme.h"
+#include "drivers/storage/block.h"
+#include "drivers/storage/partition.h"
+#include "fs/ext4/ext4.h"
+#include "fs/vfs.h"
+#include "net/net.h"
 
 /* Framebuffer and system components */
 #include "include/serial.h"
@@ -58,9 +65,13 @@ void kernel_main(void) {
         
         serial_write("ASCII art logo drawn\n");
         
-        /* Draw "Press ENTER to continue..." message in green at bottom */
+        /* Draw keyboard message at bottom */
         int msg_y = height - 50;
-        fb_print_scaled(fb, pitch, 20, msg_y, "Press ENTER to continue...", 0x00FF00, 1);
+        if (keyboard_has_controller()) {
+            fb_print_scaled(fb, pitch, 20, msg_y, "Press ENTER to continue...", 0x00FF00, 1);
+        } else {
+            fb_print_scaled(fb, pitch, 20, msg_y, "No keyboard detected", 0x00FF8800, 1);
+        }
         
     } else {
         serial_write("No framebuffer available, trying VGA\n");
@@ -90,11 +101,34 @@ void kernel_main(void) {
     
     keyboard_init();
     serial_write("Kernel: Keyboard driver initialized\n");
+
+    ahci_init();
+    nvme_init();
+
+    net_init();
+
+    static Ext4Fs root_fs;
+    if (block_count() > 0) {
+        BlockDevice *dev = block_get(0);
+        PartitionInfo part;
+        if (find_linux_partition(dev, &part)) {
+            if (ext4_mount(&root_fs, dev, part.first_lba)) {
+                vfs_mount_ext4(&root_fs);
+                serial_write("EXT4: filesystem mounted\n");
+            } else {
+                serial_write("EXT4: mount failed\n");
+            }
+        }
+    }
     
     /* Wait for ENTER key by directly polling PS/2 controller */
     serial_write("Keyboard: Waiting for ENTER key (polling mode)...\n");
-    keyboard_wait_for_enter();
-    serial_write("Keyboard: ENTER pressed!\n");
+    if (keyboard_has_controller()) {
+        keyboard_wait_for_enter();
+        serial_write("Keyboard: ENTER pressed!\n");
+    } else {
+        serial_write("Keyboard: Not detected, auto-continue\n");
+    }
     serial_write("Kernel: Initialized successfully!\n");
     serial_write("Framebuffer: Active\n");
     serial_write("Display: Starting interactive shell...\n\n");

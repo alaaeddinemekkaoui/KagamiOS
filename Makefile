@@ -44,12 +44,23 @@ CC_FLAGS_KERNEL = \
 	-fno-pie -fno-pic \
 	-fno-builtin -fno-stack-protector \
 	-nostdlib -nostdinc \
+	-I. \
+	-Idrivers \
+	-Idrivers/bus \
+	-Idrivers/storage \
+	-Idrivers/input \
+	-Idrivers/video \
+	-Idrivers/net \
+	-Inet \
+	-Ifs \
+	-Ifs/ext4 \
 	-I$(KERNEL_DIR) \
 	-I$(KERNEL_DIR)/include \
 	-I$(KERNEL_DIR)/core \
+	-I$(KERNEL_DIR)/bus \
 	-I$(KERNEL_DIR)/shell \
 	-I$(KERNEL_DIR)/vga \
-	-I$(KERNEL_DIR)/drivers \
+	-I$(BUILD_DIR)/generated \
 	-Wall -Wextra
 
 LD_FLAGS_KERNEL = -m elf_x86_64 -T linker.ld
@@ -59,6 +70,7 @@ LD_FLAGS_KERNEL = -m elf_x86_64 -T linker.ld
 # =========================
 KERNEL_ELF = $(BUILD_DIR)/kernel.elf
 KERNEL_BIN = $(EFI_BOOT_DIR)/kernel.bin
+DISK_IMG   = $(BUILD_DIR)/disk.img
 
 UEFI_OBJ = $(BUILD_DIR)/uefi_main.o
 UEFI_SO  = $(BUILD_DIR)/BOOTX64.so
@@ -68,6 +80,7 @@ UEFI_EFI = $(EFI_BOOT_DIR)/BOOTX64.EFI
 # Targets
 # =========================
 .PHONY: all clean run uefi-shell
+.PHONY: disk
 
 all: $(UEFI_EFI)
 
@@ -76,6 +89,45 @@ all: $(UEFI_EFI)
 # -------------------------
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/generated:
+	mkdir -p $(BUILD_DIR)/generated
+
+$(BUILD_DIR)/generated/ascii_art_data.h: $(KERNEL_DIR)/ascii/kagami_logo.txt Makefile | $(BUILD_DIR)/generated
+	@echo "[GEN] ascii_art_data.h from kagami_logo.txt"
+	@awk 'BEGIN { \
+		print "#ifndef KAGAMI_ASCII_ART_DATA_H"; \
+		print "#define KAGAMI_ASCII_ART_DATA_H"; \
+		print "static const char* kagami_logo[] = {"; \
+	} \
+	{ \
+		gsub(/\\/, "\\\\"); \
+		gsub(/"/, "\\\""); \
+		print "    \"" $$0 "\","; \
+	} \
+	END { \
+		print "    0"; \
+		print "};"; \
+		print "#define KAGAMI_LOGO_LINES " NR; \
+		print "#endif"; \
+	}' $< > $@
+
+$(BUILD_DIR)/generated/commands_manual.h: $(KERNEL_DIR)/ascii/COMMANDS.txt Makefile | $(BUILD_DIR)/generated
+	@echo "[GEN] commands_manual.h from COMMANDS.txt"
+	@awk 'BEGIN { \
+		print "#ifndef KAGAMI_COMMANDS_MANUAL_H"; \
+		print "#define KAGAMI_COMMANDS_MANUAL_H"; \
+		print "static const char commands_manual[] ="; \
+	} \
+	{ \
+		gsub(/\\/, "\\\\"); \
+		gsub(/"/, "\\\""); \
+		print "\"" $$0 "\\n\""; \
+	} \
+	END { \
+		print ";"; \
+		print "#endif"; \
+	}' $< > $@
 
 $(EFI_BOOT_DIR):
 	mkdir -p $(EFI_BOOT_DIR)
@@ -92,9 +144,9 @@ $(BUILD_DIR)/interrupts.o: $(KERNEL_DIR)/interrupts.asm | $(BUILD_DIR)
 
 # C files - compile from any subdirectory
 # Search order: root, core, shell, vga, drivers
-vpath %.c $(KERNEL_DIR):$(KERNEL_DIR)/core:$(KERNEL_DIR)/shell:$(KERNEL_DIR)/vga:$(KERNEL_DIR)/drivers
+vpath %.c $(KERNEL_DIR):$(KERNEL_DIR)/core:$(KERNEL_DIR)/shell:$(KERNEL_DIR)/vga:drivers/bus:drivers/storage:drivers/input:drivers/video:drivers/net:fs:fs/ext4:net
 
-$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.c $(BUILD_DIR)/generated/ascii_art_data.h $(BUILD_DIR)/generated/commands_manual.h | $(BUILD_DIR)
 	$(CC) $(CC_FLAGS_KERNEL) -I$(KERNEL_DIR)/include -I$(KERNEL_DIR) -c $< -o $@
 
 # All kernel object files
@@ -110,7 +162,16 @@ KERNEL_OBJS = \
 	$(BUILD_DIR)/vga_terminal.o \
 	$(BUILD_DIR)/serial.o \
 	$(BUILD_DIR)/framebuffer.o \
-	$(BUILD_DIR)/font.o
+	$(BUILD_DIR)/font.o \
+	$(BUILD_DIR)/block.o \
+	$(BUILD_DIR)/vfs.o \
+	$(BUILD_DIR)/ext4.o \
+	$(BUILD_DIR)/ahci.o \
+	$(BUILD_DIR)/nvme.o \
+	$(BUILD_DIR)/pci.o \
+	$(BUILD_DIR)/partition.o \
+	$(BUILD_DIR)/rtl8139.o \
+	$(BUILD_DIR)/net.o
 
 $(KERNEL_ELF): $(KERNEL_OBJS)
 	$(LD) $(LD_FLAGS_KERNEL) $^ -o $@
@@ -148,7 +209,7 @@ $(UEFI_EFI): $(UEFI_SO) $(KERNEL_BIN) | $(EFI_BOOT_DIR)
 # =========================
 # Run in QEMU (UEFI)
 # =========================
-run: all
+run: all disk
 	@echo "Starting Kagami OS (GUI)..."
 	@rm -f /tmp/OVMF_VARS_4M.fd
 	@cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/OVMF_VARS_4M.fd
@@ -156,11 +217,18 @@ run: all
 		-m 512M \
 		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 		-drive if=pflash,format=raw,file=/tmp/OVMF_VARS_4M.fd \
-		-device loader,file=$(KERNEL_BIN),addr=0x100000 \
-		-hda fat:rw:$(ESP_DIR) \
+		-drive format=raw,file=fat:rw:$(ESP_DIR) \
+		-device ahci,id=ahci \
+		-drive if=none,id=disk,file=$(DISK_IMG),format=raw \
+		-device ide-hd,drive=disk,bus=ahci.0 \
+		-netdev user,id=net0 \
+		-device rtl8139,netdev=net0 \
 		-boot menu=on \
 		-display gtk \
 		-serial stdio
+
+disk:
+	@bash tools/mkimg.sh $(DISK_IMG) 10G
 
 run-headless: all
 	@echo "Starting Kagami OS (headless)..."
@@ -172,6 +240,8 @@ run-headless: all
 		-drive if=pflash,format=raw,file=/tmp/OVMF_VARS_4M.fd \
 		-device loader,file=$(KERNEL_BIN),addr=0x100000 \
 		-hda fat:rw:$(ESP_DIR) \
+		-netdev user,id=net0 \
+		-device rtl8139,netdev=net0 \
 		-boot menu=on \
 		-nographic
 

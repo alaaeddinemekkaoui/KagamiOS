@@ -31,6 +31,72 @@ typedef struct {
 
 typedef void (*kernel_entry_t)(void);
 
+static EFI_STATUS load_kernel_from_fs(EFI_PHYSICAL_ADDRESS kernel_addr, UINTN max_size, UINTN *out_size) {
+    EFI_STATUS status;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *Volume = NULL;
+    EFI_FILE_PROTOCOL *Root = NULL;
+    EFI_FILE_PROTOCOL *File = NULL;
+    EFI_FILE_INFO *FileInfo = NULL;
+    UINTN FileInfoSize = 0;
+
+    status = uefi_call_wrapper(BS->LocateProtocol, 3, &gEfiSimpleFileSystemProtocolGuid, NULL, (void**)&Volume);
+    if (EFI_ERROR(status)) {
+        Print(L"ERROR: EFI_SIMPLE_FILE_SYSTEM_PROTOCOL not found (status: 0x%x)\n", status);
+        return status;
+    }
+
+    status = uefi_call_wrapper(Volume->OpenVolume, 2, Volume, &Root);
+    if (EFI_ERROR(status)) {
+        Print(L"ERROR: Cannot open volume (status: 0x%x)\n", status);
+        return status;
+    }
+
+    status = uefi_call_wrapper(Root->Open, 5, Root, &File, L"kernel.bin", EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(status)) {
+        Print(L"ERROR: Cannot open kernel.bin (status: 0x%x)\n", status);
+        return status;
+    }
+
+    status = uefi_call_wrapper(File->GetInfo, 4, File, &gEfiFileInfoGuid, &FileInfoSize, NULL);
+    if (status != EFI_BUFFER_TOO_SMALL || FileInfoSize == 0) {
+        Print(L"ERROR: GetInfo size failed (status: 0x%x)\n", status);
+        return status;
+    }
+
+    status = uefi_call_wrapper(BS->AllocatePool, 3, EfiLoaderData, FileInfoSize, (VOID**)&FileInfo);
+    if (EFI_ERROR(status)) {
+        Print(L"ERROR: Cannot allocate FileInfo (status: 0x%x)\n", status);
+        return status;
+    }
+
+    status = uefi_call_wrapper(File->GetInfo, 4, File, &gEfiFileInfoGuid, &FileInfoSize, FileInfo);
+    if (EFI_ERROR(status)) {
+        Print(L"ERROR: GetInfo failed (status: 0x%x)\n", status);
+        return status;
+    }
+
+    if (FileInfo->FileSize == 0 || FileInfo->FileSize > max_size) {
+        Print(L"ERROR: kernel.bin size invalid (%lu bytes, max %lu)\n", FileInfo->FileSize, max_size);
+        return EFI_BAD_BUFFER_SIZE;
+    }
+
+    UINTN ReadSize = (UINTN)FileInfo->FileSize;
+    status = uefi_call_wrapper(File->Read, 3, File, &ReadSize, (VOID*)(UINTN)kernel_addr);
+    if (EFI_ERROR(status) || ReadSize != (UINTN)FileInfo->FileSize) {
+        Print(L"ERROR: Read kernel.bin failed (status: 0x%x, read %lu)\n", status, ReadSize);
+        return status;
+    }
+
+    uefi_call_wrapper(File->Close, 1, File);
+    uefi_call_wrapper(Root->Close, 1, Root);
+
+    if (out_size) {
+        *out_size = ReadSize;
+    }
+
+    return EFI_SUCCESS;
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     InitializeLib(ImageHandle, SystemTable);
 
@@ -77,6 +143,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     
     Print(L"\n[DEBUG] ASCII art displayed\n");
     uefi_call_wrapper(BS->Stall, 1, 2000000);
+
+    /* Load kernel from FAT32 (UEFI filesystem) */
+    UINTN kernel_size = 0;
+    status = load_kernel_from_fs(kernel_addr, KERNEL_RESERVED_SIZE, &kernel_size);
+    if (EFI_ERROR(status)) {
+        Print(L"ERROR: Kernel load failed (status: 0x%x)\n", status);
+        uefi_call_wrapper(BS->Stall, 1, 3000000);
+        return status;
+    }
+    Print(L"KERNEL: Loaded %lu bytes at 0x%lx from FAT32\n", kernel_size, kernel_addr);
 
     /* Now clear and show boot information */
     uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
@@ -180,7 +256,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     }
     
     Print(L"TOTAL MEMORY: %u MB\n", total_memory / (1024 * 1024));
-    Print(L"KERNEL: Pre-loaded at 0x%lx by QEMU\n", kernel_addr);
+    Print(L"KERNEL: Loaded at 0x%lx from FAT32\n", kernel_addr);
     
     /* Setup boot info structure */
     BOOT_INFO *info = (BOOT_INFO*)BOOT_INFO_ADDR;
