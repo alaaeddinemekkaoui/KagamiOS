@@ -1,5 +1,5 @@
 #include "heap.h"
-#include "vga.h"
+#include "include/serial.h"
 
 /* Define NULL if not available */
 #ifndef NULL
@@ -64,54 +64,49 @@ void* calloc(size_t nmemb, size_t size) {
     return ptr;
 }
 
+static void append_uint_dec(char *buf, size_t *pos, size_t value) {
+    char tmp[20];
+    size_t n = 0;
+    if (value == 0) {
+        buf[(*pos)++] = '0';
+        return;
+    }
+    while (value > 0 && n < sizeof(tmp)) {
+        tmp[n++] = '0' + (value % 10);
+        value /= 10;
+    }
+    while (n > 0) {
+        buf[(*pos)++] = tmp[--n];
+    }
+}
+
 void heap_stats(void) {
-    const uint8_t color = (VGA_COLOR_BLACK << 4) | VGA_COLOR_LIGHT_BROWN;
-    
-    char buf[60];
+    char buf[80];
     size_t pos = 0;
-    
-    buf[pos++] = 'H';
-    buf[pos++] = 'e';
-    buf[pos++] = 'a';
-    buf[pos++] = 'p';
-    buf[pos++] = ':';
-    buf[pos++] = ' ';
-    
+
+    const char *prefix = "Heap: ";
+    while (*prefix) {
+        buf[pos++] = *prefix++;
+    }
+
     /* Used memory in KB */
     size_t used_kb = heap.used / 1024;
-    if (used_kb >= 100) {
-        buf[pos++] = '0' + (used_kb / 100);
-        buf[pos++] = '0' + ((used_kb / 10) % 10);
-        buf[pos++] = '0' + (used_kb % 10);
-    } else if (used_kb >= 10) {
-        buf[pos++] = '0' + (used_kb / 10);
-        buf[pos++] = '0' + (used_kb % 10);
-    } else {
-        buf[pos++] = '0' + used_kb;
-    }
+    append_uint_dec(buf, &pos, used_kb);
     buf[pos++] = 'K';
     buf[pos++] = 'B';
     buf[pos++] = ' ';
     buf[pos++] = '/';
     buf[pos++] = ' ';
-    
+
     /* Total heap size in KB */
     size_t total_kb = HEAP_SIZE / 1024;
-    if (total_kb >= 100) {
-        buf[pos++] = '0' + (total_kb / 100);
-        buf[pos++] = '0' + ((total_kb / 10) % 10);
-        buf[pos++] = '0' + (total_kb % 10);
-    } else if (total_kb >= 10) {
-        buf[pos++] = '0' + (total_kb / 10);
-        buf[pos++] = '0' + (total_kb % 10);
-    } else {
-        buf[pos++] = '0' + total_kb;
-    }
+    append_uint_dec(buf, &pos, total_kb);
     buf[pos++] = 'K';
     buf[pos++] = 'B';
+    buf[pos++] = '\n';
     buf[pos] = '\0';
-    
-    vga_write_at(buf, 5, 0, color);
+
+    serial_write(buf);
 }
 
 size_t heap_used(void) {

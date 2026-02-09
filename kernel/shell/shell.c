@@ -2398,7 +2398,17 @@ void shell_init(void) {
 
 /* Main framebuffer shell */
 void shell_run(void) {
-    /* This is now redirected to fb_shell_run from main.c */
+    BOOT_INFO* boot_info = get_boot_info();
+    if (!boot_info_valid()) {
+        serial_write("Shell: invalid boot info\n");
+        return;
+    }
+    if (boot_info->framebuffer_addr == 0) {
+        serial_write("Shell: no framebuffer available\n");
+        return;
+    }
+
+    fb_shell_run(boot_info);
 }
 
 /* Main framebuffer shell - called from main.c */
@@ -2409,67 +2419,47 @@ void fb_shell_run(BOOT_INFO* boot_info) {
     }
 
     fs_init();
-
-    KLOG("Shell: entering framebuffer mode");
     
+    /* Bind framebuffer for text rendering */
     unsigned int* fb = (unsigned int*)(unsigned long)boot_info->framebuffer_addr;
     unsigned int pitch = boot_info->framebuffer_pitch;
     unsigned int width = boot_info->framebuffer_width;
     unsigned int height = boot_info->framebuffer_height;
-    unsigned int stride = pitch / 4;
 
-    char fb_info[128];
-    int fb_pos = 0;
-    append_str(fb_info, &fb_pos, "Shell FB: addr=0x");
-    append_hex(fb_info, &fb_pos, (uint32_t)((uint64_t)boot_info->framebuffer_addr >> 32), 8);
-    append_hex(fb_info, &fb_pos, (uint32_t)(boot_info->framebuffer_addr & 0xFFFFFFFF), 8);
-    append_str(fb_info, &fb_pos, " pitch=0x");
-    append_hex(fb_info, &fb_pos, pitch, 8);
-    append_str(fb_info, &fb_pos, " w=0x");
-    append_hex(fb_info, &fb_pos, width, 8);
-    append_str(fb_info, &fb_pos, " h=0x");
-    append_hex(fb_info, &fb_pos, height, 8);
-    fb_info[fb_pos] = 0;
-    serial_write(fb_info);
-    serial_write("\n");
+    unsigned int stride = pitch / 4;
 
     if (width == 0 || height == 0 || pitch == 0) {
         serial_write("Shell: invalid framebuffer params\n");
-        KERR("Shell: invalid framebuffer params");
         return;
     }
     
-    /* Clear framebuffer */
+    /* Clear framebuffer to black */
+    serial_write("Shell: Clearing framebuffer...\n");
     for (unsigned int y = 0; y < height; y++) {
         unsigned int* row = fb + y * stride;
         for (unsigned int x = 0; x < width; x++) {
             row[x] = 0x000000;
         }
     }
-
-    unsigned int start_y = 0;
-
-    /* Simple shell header to guarantee visibility on all resolutions */
-    unsigned int left = (width > 60) ? 20 : 8;
-    unsigned int line = (height >= 720) ? 16 : 12;
-    unsigned int header_h = (height >= 720) ? 56 : 44;
-    fb_clear_rect(fb, pitch, width, 0, 0, width, header_h, 0x00202020);
-    fb_print_scaled(fb, pitch, left, 8, "Kagami OS Shell", 0x0000FF00, 2);
-    fb_print(fb, pitch, left, 8 + line * 3, "Type 'help' for commands", 0x00FFFFFF);
-    fb_print(fb, pitch, left, 8 + line * 4, "Press ENTER to execute", 0x00FFFFFF);
-    start_y = header_h + 6;
+    serial_write("Shell: Screen cleared\n");
     
-    /* Initialize shell state */
+    serial_write("Shell: Terminal ready\n");
+
+    /* Initialize shell state for input rendering */
     shell_state.pos = 0;
     shell_state.buffer[0] = 0;
-    shell_state.cursor_x = left;
-    shell_state.cursor_y = start_y;
-    shell_state.line_height = line;
+    shell_state.cursor_x = 0;
+    shell_state.cursor_y = 0;
+    shell_state.line_height = 8;
     shell_state.shift_pressed = 0;
     shell_state.scroll_offset = 0;
     
-    serial_write("Unified framebuffer shell started with directory support\n");
-    KLOG("Shell: render complete");
+    serial_write("Shell: Ready for input\n");
+    
+    /* Render initial prompt immediately so user sees the terminal */
+    char initial_prompt[64];
+    get_dir_prompt(initial_prompt);
+    render_input(fb, pitch, width, initial_prompt);
     
     /* Main shell loop */
     while (1) {

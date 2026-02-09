@@ -3,6 +3,8 @@
 
 #include "types.h"
 #include "boot_info.h"
+#include "vga/vga_terminal.h"
+#include "display/gop_terminal.h"
 
 #define SHELL_COMMAND_MAX 80
 #define SHELL_HISTORY_MAX 10

@@ -171,10 +171,58 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     if (!EFI_ERROR(status) && gop_handle_count > 0) {
         status = uefi_call_wrapper(BS->HandleProtocol, 3, gop_handles[0], &gop_guid, (VOID**)&gop);
         if (!EFI_ERROR(status)) {
-            Print(L"GOP: %ux%u framebuffer at 0x%lx\n",
+            Print(L"GOP: Current mode %ux%u at 0x%lx\n",
                   gop->Mode->Info->HorizontalResolution,
                   gop->Mode->Info->VerticalResolution,
                   gop->Mode->FrameBufferBase);
+
+            /* Pick a graphics mode explicitly - prefer 1280x800 */
+            const UINT32 target_w = 1280;
+            const UINT32 target_h = 800;
+            Print(L"GOP: Searching for %ux%u mode...\n", target_w, target_h);
+            UINT32 best_mode = gop->Mode->Mode;
+            UINT32 best_w = gop->Mode->Info->HorizontalResolution;
+            UINT32 best_h = gop->Mode->Info->VerticalResolution;
+            UINT32 target_mode = (UINT32)(-1);
+
+            for (UINT32 i = 0; i < gop->Mode->MaxMode; i++) {
+                EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = NULL;
+                UINTN info_size = 0;
+                EFI_STATUS qstat = uefi_call_wrapper(gop->QueryMode, 4, gop, i, &info_size, &info);
+                if (EFI_ERROR(qstat) || info == NULL) {
+                    continue;
+                }
+
+                /* Prefer 32bpp RGB/BGR modes */
+                if (info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor &&
+                    info->PixelFormat != PixelRedGreenBlueReserved8BitPerColor) {
+                    continue;
+                }
+
+                if (info->HorizontalResolution == target_w && info->VerticalResolution == target_h) {
+                    target_mode = i;
+                }
+
+                if ((info->HorizontalResolution * info->VerticalResolution) > (best_w * best_h)) {
+                    best_mode = i;
+                    best_w = info->HorizontalResolution;
+                    best_h = info->VerticalResolution;
+                }
+            }
+
+            UINT32 chosen_mode = (target_mode != (UINT32)(-1)) ? target_mode : best_mode;
+            if (chosen_mode != gop->Mode->Mode) {
+                EFI_STATUS mstat = uefi_call_wrapper(gop->SetMode, 2, gop, chosen_mode);
+                if (EFI_ERROR(mstat)) {
+                    Print(L"WARNING: GOP SetMode failed (status: 0x%x)\n", mstat);
+                } else {
+                    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = gop->Mode->Info;
+                    Print(L"GOP: SetMode -> %ux%u\n", info->HorizontalResolution, info->VerticalResolution);
+                }
+            } else {
+                /* Re-apply current mode to ensure framebuffer is active */
+                uefi_call_wrapper(gop->SetMode, 2, gop, gop->Mode->Mode);
+            }
         } else {
             Print(L"WARNING: Cannot get GOP protocol (status: 0x%x)\n", status);
             gop = NULL;
@@ -277,11 +325,12 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     
     /* GOP framebuffer info */
     if (gop != NULL) {
+        UINT32 bytes_per_pixel = 4;
         info->framebuffer_addr = gop->Mode->FrameBufferBase;
         info->framebuffer_width = gop->Mode->Info->HorizontalResolution;
         info->framebuffer_height = gop->Mode->Info->VerticalResolution;
-        info->framebuffer_pitch = gop->Mode->Info->PixelsPerScanLine * 4;
-        info->framebuffer_bpp = 32;
+        info->framebuffer_pitch = gop->Mode->Info->PixelsPerScanLine * bytes_per_pixel;
+        info->framebuffer_bpp = bytes_per_pixel * 8;
     } else {
         info->framebuffer_addr = 0;
         info->framebuffer_width = 0;

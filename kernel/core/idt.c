@@ -1,6 +1,6 @@
 #include "idt.h"
-#include "vga.h"
 #include "keyboard.h"
+#include "include/serial.h"
 
 /* IDT table - 256 entries for 256 possible interrupt vectors */
 static IDT_DESCRIPTOR idt[256];
@@ -9,14 +9,9 @@ static IDT_REGISTER idt_reg;
 /* Keyboard handler counter (for demonstration) */
 static volatile uint32_t keyboard_presses = 0;
 
-/* Visual debug - show interrupt activity */
+/* Interrupt debug hook (serial-safe) */
 static void debug_show_keypress(void) {
-    /* Update position 0,79 with a character to show interrupt is firing */
-    volatile uint16_t* vga = (uint16_t*)0xB8000;
-    static uint8_t toggle = 0;
-    toggle = !toggle;
-    uint8_t color = (0 << 4) | 0x0E; /* Yellow on black */
-    vga[79] = (toggle ? '*' : '+') | (color << 8);
+    /* Keep minimal to avoid heavy I/O in ISR */
 }
 
 /* Exception handler stubs (defined in interrupts.asm) */
@@ -40,44 +35,52 @@ extern void isr_machine_check(void);
 extern void isr_simd(void);
 extern void isr_keyboard(void);
 
+static void append_hex64(char *buf, int *pos, uint64_t value) {
+    const char *hex = "0123456789ABCDEF";
+    for (int i = 15; i >= 0; i--) {
+        buf[(*pos)++] = hex[(value >> (i * 4)) & 0xF];
+    }
+}
+
 /* Generic exception handler for all unhandled exceptions */
 void default_exception_handler(uint8_t vector, uint64_t error_code, uint64_t rip) {
-    (void)error_code;  /* Suppress unused parameter warning */
-    (void)rip;         /* Suppress unused parameter warning */
-    
-    const uint8_t color = (VGA_COLOR_BLACK << 4) | VGA_COLOR_LIGHT_RED;
-    
-    vga_write_at("EXCEPTION OCCURRED!", 8, 25, color);
-    
-    char buf[32];
-    /* Format vector number */
-    buf[0] = 'V';
-    buf[1] = 'e';
-    buf[2] = 'c';
-    buf[3] = ':';
-    buf[4] = ' ';
-    if (vector >= 100) {
-        buf[5] = '0' + (vector / 100);
-        buf[6] = '0' + ((vector / 10) % 10);
-        buf[7] = '0' + (vector % 10);
-        buf[8] = ' ';
-        buf[9] = '@';
-        buf[10] = ' ';
-        buf[11] = '0';
-        buf[12] = 'x';
-        buf[13] = '\0';
-    } else {
-        buf[5] = '0' + (vector / 10);
-        buf[6] = '0' + (vector % 10);
-        buf[7] = ' ';
-        buf[8] = '@';
-        buf[9] = ' ';
-        buf[10] = '0';
-        buf[11] = 'x';
-        buf[12] = '\0';
+    char buf[80];
+    int pos = 0;
+
+    const char *prefix = "EXCEPTION: vec=";
+    while (*prefix) {
+        buf[pos++] = *prefix++;
     }
-    vga_write_at(buf, 10, 25, color);
-    
+
+    /* vector in decimal (0-255) */
+    if (vector >= 100) {
+        buf[pos++] = '0' + (vector / 100);
+        buf[pos++] = '0' + ((vector / 10) % 10);
+        buf[pos++] = '0' + (vector % 10);
+    } else if (vector >= 10) {
+        buf[pos++] = '0' + (vector / 10);
+        buf[pos++] = '0' + (vector % 10);
+    } else {
+        buf[pos++] = '0' + vector;
+    }
+
+    const char *mid = " rip=0x";
+    while (*mid) {
+        buf[pos++] = *mid++;
+    }
+    append_hex64(buf, &pos, rip);
+
+    const char *mid2 = " err=0x";
+    while (*mid2) {
+        buf[pos++] = *mid2++;
+    }
+    append_hex64(buf, &pos, error_code);
+
+    buf[pos++] = '\n';
+    buf[pos] = 0;
+
+    serial_write(buf);
+
     while (1) {
         __asm__ __volatile__("cli; hlt");
     }

@@ -74,24 +74,13 @@ void kernel_main(void) {
             fb_print_scaled(fb, pitch, 20, msg_y, "No keyboard detected", 0x00FF8800, 1);
         }
 
-        klog_init_fb(fb, pitch, width, height);
-        KLOG("Framebuffer logger initialized");
+        /* DO NOT enable klog framebuffer output - keep it serial-only */
+        /* klog_init_fb(fb, pitch, width, height); */
+        /* KLOG("Framebuffer logger initialized"); */
         
     } else {
-        serial_write("No framebuffer available, trying VGA\n");
-        
-        /* Fallback to VGA text mode */
-        volatile uint16_t* vga = (uint16_t*)0xB8000;
-        vga[0] = 'K' | (0x0A << 8);
-        vga[1] = 'E' | (0x0A << 8);
-        vga[2] = 'R' | (0x0A << 8);
-        vga[3] = 'N' | (0x0A << 8);
-        vga[4] = 'E' | (0x0A << 8);
-        vga[5] = 'L' | (0x0A << 8);
-        vga[6] = ' ' | (0x0A << 8);
-        vga[7] = 'O' | (0x0A << 8);
-        vga[8] = 'K' | (0x0A << 8);
-        vga[9] = '!' | (0x0A << 8);
+        serial_write("ERROR: No framebuffer available (UEFI requires GOP).\n");
+        while (1) { __asm__ __volatile__("hlt"); }
     }
     
     serial_write("Kernel: Waiting for ENTER to boot...\n");
@@ -144,21 +133,20 @@ void kernel_main(void) {
     if (keyboard_has_controller()) {
         keyboard_wait_for_enter();
         serial_write("Keyboard: ENTER pressed!\n");
-        KLOG("Keyboard: ENTER pressed!");
     } else {
         serial_write("Keyboard: Not detected, auto-continue\n");
-        KERR("Keyboard: Not detected, auto-continue");
     }
+    
+    /* Disable klog framebuffer output before shell starts */
+    klog_enable(0);
+    
     serial_write("Kernel: Initialized successfully!\n");
     serial_write("Framebuffer: Active\n");
     serial_write("Display: Starting interactive shell...\n\n");
-    KLOG("Kernel: Initialized successfully!");
-    KLOG("Display: Starting interactive shell...");
-    klog_enable(0);
     
     /* Start interactive framebuffer shell with GPU rendering */
     /* Shell will display ASCII art logo and fantasy welcome message */
-    fb_shell_run(boot_info);
+    shell_run();
     
     /* If shell exits, halt */
     while (1) {

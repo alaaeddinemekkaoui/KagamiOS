@@ -59,7 +59,7 @@ CC_FLAGS_KERNEL = \
 	-I$(KERNEL_DIR)/core \
 	-I$(KERNEL_DIR)/bus \
 	-I$(KERNEL_DIR)/shell \
-	-I$(KERNEL_DIR)/vga \
+	-I$(KERNEL_DIR)/display \
 	-I$(BUILD_DIR)/generated \
 	-Wall -Wextra
 
@@ -143,8 +143,8 @@ $(BUILD_DIR)/interrupts.o: $(KERNEL_DIR)/interrupts.asm | $(BUILD_DIR)
 	$(ASM) $(ASM_FLAGS) $< -o $@
 
 # C files - compile from any subdirectory
-# Search order: root, core, shell, vga, drivers
-vpath %.c $(KERNEL_DIR):$(KERNEL_DIR)/core:$(KERNEL_DIR)/shell:$(KERNEL_DIR)/vga:drivers/bus:drivers/storage:drivers/input:drivers/video:drivers/net:fs:fs/ext4:net
+# Search order: root, core, shell, vga, display, drivers
+vpath %.c $(KERNEL_DIR):$(KERNEL_DIR)/core:$(KERNEL_DIR)/shell:$(KERNEL_DIR)/vga:$(KERNEL_DIR)/display:drivers/bus:drivers/storage:drivers/input:drivers/video:drivers/net:fs:fs/ext4:net
 
 $(BUILD_DIR)/%.o: %.c $(BUILD_DIR)/generated/ascii_art_data.h $(BUILD_DIR)/generated/commands_manual.h | $(BUILD_DIR)
 	$(CC) $(CC_FLAGS_KERNEL) -I$(KERNEL_DIR)/include -I$(KERNEL_DIR) -c $< -o $@
@@ -154,12 +154,12 @@ KERNEL_OBJS = \
 	$(BUILD_DIR)/entry.o \
 	$(BUILD_DIR)/interrupts.o \
 	$(BUILD_DIR)/main.o \
-	$(BUILD_DIR)/vga.o \
 	$(BUILD_DIR)/idt.o \
 	$(BUILD_DIR)/heap.o \
 	$(BUILD_DIR)/keyboard.o \
 	$(BUILD_DIR)/shell.o \
 	$(BUILD_DIR)/vga_terminal.o \
+	$(BUILD_DIR)/gop_terminal.o \
 	$(BUILD_DIR)/serial.o \
 	$(BUILD_DIR)/klog.o \
 	$(BUILD_DIR)/framebuffer.o \
@@ -211,7 +211,7 @@ $(UEFI_EFI): $(UEFI_SO) $(KERNEL_BIN) | $(EFI_BOOT_DIR)
 # Run in QEMU (UEFI)
 # =========================
 run: all disk
-	@echo "Starting Kagami OS (GUI)..."
+	@echo "Starting Kagami OS (UEFI + GOP 1280x800)..."
 	@rm -f /tmp/OVMF_VARS_4M.fd
 	@cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/OVMF_VARS_4M.fd
 	@qemu-system-x86_64 \
@@ -225,26 +225,29 @@ run: all disk
 		-netdev user,id=net0 \
 		-device rtl8139,netdev=net0 \
 		-boot menu=on \
-		-display gtk \
+		-display sdl,gl=off \
 		-serial stdio
 
 disk:
 	@bash tools/mkimg.sh $(DISK_IMG) 10G
 
 run-headless: all
-	@echo "Starting Kagami OS (headless)..."
+	@echo "Starting Kagami OS (headless with GOP Framebuffer)..."
 	@rm -f /tmp/OVMF_VARS_4M.fd
 	@cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/OVMF_VARS_4M.fd
 	@qemu-system-x86_64 \
 		-m 512M \
 		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 		-drive if=pflash,format=raw,file=/tmp/OVMF_VARS_4M.fd \
-		-device loader,file=$(KERNEL_BIN),addr=0x100000 \
-		-hda fat:rw:$(ESP_DIR) \
+		-drive format=raw,file=fat:rw:$(ESP_DIR) \
+		-device ahci,id=ahci \
+		-drive if=none,id=disk,file=$(DISK_IMG),format=raw \
+		-device ide-hd,drive=disk,bus=ahci.0 \
 		-netdev user,id=net0 \
 		-device rtl8139,netdev=net0 \
 		-boot menu=on \
-		-nographic
+		-nographic \
+		-serial stdio
 
 uefi-run: run
 
